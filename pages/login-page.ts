@@ -98,4 +98,17 @@ export class LoginPage extends BasePage {
   async clearPassword(): Promise<void> {
     await this.passwordField.clear();
   }
+
+  async login(username: string, password: string): Promise<void> {
+    await this.loginWithCredentials(username, password);
+  }
+
+  async getFlashMessage(): Promise<string> {
+    const error = this.page.locator("#flash");
+    return this.getText(error);
+  }
+
+  async getUsernameValue(): Promise<string> {
+    return this.usernameField.inputValue();
+  }
 }
