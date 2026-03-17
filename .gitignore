@@ -1,0 +1,10 @@
+node_modules/
+dist/
+test_artifacts/
+.env
+.env.dev
+.env.test
+.env.prod
+!.env.example
+playwright-report/
+test-results/

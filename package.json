@@ -1,0 +1,27 @@
+{
+  "name": "playwright-ai-framework-ts",
+  "version": "1.0.0",
+  "description": "AI-powered Playwright test framework with self-healing, visual regression, and API mocking",
+  "scripts": {
+    "test": "playwright test",
+    "test:smoke": "playwright test --grep @smoke",
+    "test:visual": "playwright test --grep @visual",
+    "test:security": "playwright test --grep @security",
+    "test:api": "playwright test --grep @api",
+    "test:headed": "HEADLESS=false playwright test",
+    "test:debug": "PWDEBUG=1 playwright test",
+    "report": "playwright show-report",
+    "allure:generate": "allure generate test_artifacts/allure/allure-results -o test_artifacts/allure/allure-report --clean",
+    "allure:open": "allure open test_artifacts/allure/allure-report"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.49.0",
+    "typescript": "^5.5.0",
+    "dotenv": "^16.4.0",
+    "ollama": "^0.5.0",
+    "pixelmatch": "^6.0.0",
+    "pngjs": "^7.0.0",
+    "allure-playwright": "^3.0.0",
+    "@types/node": "^22.0.0"
+  }
+}
