@@ -6,6 +6,7 @@ export default defineConfig({
   timeout: settings.TIMEOUT,
   retries: settings.RETRY_COUNT,
   reporter: [
+    ["./utils/ai-healing-reporter.ts"],
     ["html"],
     ["list"],
   ],
