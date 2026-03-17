@@ -1,12 +1,8 @@
 import { test as base } from "@playwright/test";
 import { App } from "../pages/app.js";
+import { NetworkMocker } from "../utils/network-mocking.js";
 
-// Forward declarations — these will be implemented in Tasks 7 and 8
-// For now, use minimal interfaces so fixtures compile
-interface NetworkMocker {
-  clearMocks(): Promise<void>;
-}
-
+// Forward declaration — will be implemented in Task 8
 interface VisualRegression {}
 
 type Fixtures = {
@@ -22,12 +18,7 @@ export const test = base.extend<Fixtures>({
   },
 
   apiMocker: async ({ page }, use) => {
-    // Will be replaced with real NetworkMocker in Task 7
-    const mocker: NetworkMocker = {
-      async clearMocks() {
-        await page.unroute("**/*");
-      },
-    };
+    const mocker = new NetworkMocker(page);
     await use(mocker);
     await mocker.clearMocks();
   },
