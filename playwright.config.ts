@@ -1,5 +1,6 @@
 import { defineConfig, devices } from "@playwright/test";
 import { settings } from "./config/settings.js";
+import { isBrowserStackEnabled, getBrowserStackCaps } from "./utils/browserstack.js";
 
 export default defineConfig({
   testDir: "./tests",
@@ -31,5 +32,15 @@ export default defineConfig({
       name: "webkit",
       use: { ...devices["Desktop Safari"] },
     },
+    ...(isBrowserStackEnabled()
+      ? [{
+          name: "browserstack",
+          use: {
+            connectOptions: {
+              wsEndpoint: `wss://cdp.browserstack.com/playwright?caps=${JSON.stringify(getBrowserStackCaps())}`,
+            },
+          },
+        }]
+      : []),
   ],
 });
