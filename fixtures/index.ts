@@ -1,9 +1,7 @@
 import { test as base } from "@playwright/test";
 import { App } from "../pages/app.js";
 import { NetworkMocker } from "../utils/network-mocking.js";
-
-// Forward declaration — will be implemented in Task 8
-interface VisualRegression {}
+import { VisualRegression } from "../utils/visual-regression.js";
 
 type Fixtures = {
   app: App;
@@ -24,8 +22,7 @@ export const test = base.extend<Fixtures>({
   },
 
   visualRegression: async ({ page }, use) => {
-    // Will be replaced with real VisualRegression in Task 8
-    const vr: VisualRegression = {};
+    const vr = new VisualRegression(page);
     await use(vr);
   },
 });

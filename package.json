@@ -16,12 +16,14 @@
   },
   "devDependencies": {
     "@playwright/test": "^1.49.0",
-    "typescript": "^5.5.0",
+    "@types/node": "^22.0.0",
+    "@types/pixelmatch": "^5.2.6",
+    "@types/pngjs": "^6.0.5",
+    "allure-playwright": "^3.0.0",
     "dotenv": "^16.4.0",
     "ollama": "^0.5.0",
     "pixelmatch": "^6.0.0",
     "pngjs": "^7.0.0",
-    "allure-playwright": "^3.0.0",
-    "@types/node": "^22.0.0"
+    "typescript": "^5.5.0"
   }
 }
