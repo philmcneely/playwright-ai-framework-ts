@@ -21,11 +21,20 @@ jobs:
         env:
           BASE_URL: https://the-internet.herokuapp.com
           HEADLESS: "true"
+          JIRA_ENABLED: "false"
+          OBSERVABILITY_ENABLED: "true"
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: playwright-report
           path: playwright-report/
+          retention-days: 30
+      - name: Upload observability report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: observability-report-smoke
+          path: test_artifacts/observability/
           retention-days: 30
 
   full:
@@ -44,9 +53,18 @@ jobs:
         env:
           BASE_URL: https://the-internet.herokuapp.com
           HEADLESS: "true"
+          JIRA_ENABLED: "false"
+          OBSERVABILITY_ENABLED: "true"
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: playwright-report-full
           path: playwright-report/
+          retention-days: 30
+      - name: Upload observability report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: observability-report-full
+          path: test_artifacts/observability/
           retention-days: 30
