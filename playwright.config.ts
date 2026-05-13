@@ -8,6 +8,8 @@ export default defineConfig({
   retries: settings.RETRY_COUNT,
   reporter: [
     ["./utils/ai-healing-reporter.ts"],
+    ["./utils/jira-reporter.ts"],
+    ["./utils/observability-reporter.ts"],
     ["html"],
     ["list"],
   ],

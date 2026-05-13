@@ -1,0 +1,202 @@
+import * as fs from "fs";
+import * as path from "path";
+import { ARTIFACT_ROOT } from "../config/artifact-paths.js";
+import { debugPrint } from "../config/settings.js";
+
+export interface TestMetric {
+  testId: string;
+  testName: string;
+  suite: string;
+  status: "passed" | "failed" | "skipped" | "timedOut";
+  durationMs: number;
+  retryCount: number;
+  browser: string;
+  timestamp: string;
+  commitSha?: string;
+  branch?: string;
+  healEvent?: boolean;
+  healConfidence?: number;
+  errorCategory?: string;
+  tags?: string[];
+}
+
+export interface ObservabilitySummary {
+  totalTests: number;
+  passed: number;
+  failed: number;
+  skipped: number;
+  timedOut: number;
+  flakeCount: number;
+  totalDurationMs: number;
+  avgDurationMs: number;
+  healEvents: number;
+  passRate: number;
+  flakeRate: number;
+  slowestTests: Array<{ name: string; durationMs: number }>;
+  failuresByCategory: Record<string, number>;
+}
+
+const OBSERVABILITY_DIR = path.join(ARTIFACT_ROOT, "observability");
+const METRICS_FILE = path.join(OBSERVABILITY_DIR, "metrics.jsonl");
+
+export class TestObservabilityCollector {
+  enabled: boolean;
+  private metrics: TestMetric[] = [];
+  private retryTracker = new Map<string, number>();
+
+  constructor() {
+    this.enabled =
+      (process.env.OBSERVABILITY_ENABLED || "false").toLowerCase() === "true";
+  }
+
+  trackRetry(testId: string): void {
+    const count = (this.retryTracker.get(testId) || 0) + 1;
+    this.retryTracker.set(testId, count);
+  }
+
+  getRetryCount(testId: string): number {
+    return this.retryTracker.get(testId) || 0;
+  }
+
+  record(metric: TestMetric): void {
+    if (!this.enabled) return;
+    this.metrics.push(metric);
+    this.appendToFile(metric);
+  }
+
+  private appendToFile(metric: TestMetric): void {
+    try {
+      fs.mkdirSync(OBSERVABILITY_DIR, { recursive: true });
+      fs.appendFileSync(METRICS_FILE, JSON.stringify(metric) + "\n");
+    } catch (err) {
+      debugPrint(`[Observability] Failed to write metric: ${err}`);
+    }
+  }
+
+  summarize(): ObservabilitySummary {
+    const total = this.metrics.length;
+    const passed = this.metrics.filter((m) => m.status === "passed").length;
+    const failed = this.metrics.filter((m) => m.status === "failed").length;
+    const skipped = this.metrics.filter((m) => m.status === "skipped").length;
+    const timedOut = this.metrics.filter((m) => m.status === "timedOut").length;
+    const flakeCount = this.metrics.filter(
+      (m) => m.retryCount > 0 && m.status === "passed",
+    ).length;
+    const totalDuration = this.metrics.reduce((s, m) => s + m.durationMs, 0);
+    const healEvents = this.metrics.filter((m) => m.healEvent).length;
+
+    const failuresByCategory: Record<string, number> = {};
+    for (const m of this.metrics) {
+      if (m.status === "failed" && m.errorCategory) {
+        failuresByCategory[m.errorCategory] =
+          (failuresByCategory[m.errorCategory] || 0) + 1;
+      }
+    }
+
+    const slowest = [...this.metrics]
+      .sort((a, b) => b.durationMs - a.durationMs)
+      .slice(0, 10)
+      .map((m) => ({ name: m.testName, durationMs: m.durationMs }));
+
+    return {
+      totalTests: total,
+      passed,
+      failed,
+      skipped,
+      timedOut,
+      flakeCount,
+      totalDurationMs: totalDuration,
+      avgDurationMs: total > 0 ? Math.round(totalDuration / total) : 0,
+      healEvents,
+      passRate: total > 0 ? Math.round((passed / total) * 10000) / 100 : 0,
+      flakeRate: total > 0 ? Math.round((flakeCount / total) * 10000) / 100 : 0,
+      slowestTests: slowest,
+      failuresByCategory,
+    };
+  }
+
+  writeReport(): void {
+    if (!this.enabled || this.metrics.length === 0) return;
+
+    const summary = this.summarize();
+    const reportPath = path.join(OBSERVABILITY_DIR, "summary.json");
+    const markdownPath = path.join(OBSERVABILITY_DIR, "report.md");
+
+    fs.mkdirSync(OBSERVABILITY_DIR, { recursive: true });
+    fs.writeFileSync(reportPath, JSON.stringify(summary, null, 2));
+
+    const md = `# Test Observability Report
+
+**Generated:** ${new Date().toISOString()}
+
+## Summary
+
+| Metric | Value |
+|--------|-------|
+| Total Tests | ${summary.totalTests} |
+| Passed | ${summary.passed} |
+| Failed | ${summary.failed} |
+| Skipped | ${summary.skipped} |
+| Timed Out | ${summary.timedOut} |
+| Pass Rate | ${summary.passRate}% |
+| Flake Count | ${summary.flakeCount} |
+| Flake Rate | ${summary.flakeRate}% |
+| Heal Events | ${summary.healEvents} |
+| Total Duration | ${(summary.totalDurationMs / 1000).toFixed(1)}s |
+| Avg Duration | ${(summary.avgDurationMs / 1000).toFixed(1)}s |
+
+## Slowest Tests
+
+${summary.slowestTests.map((t, i) => `${i + 1}. **${t.name}** — ${(t.durationMs / 1000).toFixed(1)}s`).join("\n")}
+
+## Failures by Category
+
+${
+  Object.entries(summary.failuresByCategory).length > 0
+    ? Object.entries(summary.failuresByCategory)
+        .map(([cat, count]) => `- **${cat}:** ${count}`)
+        .join("\n")
+    : "_No categorized failures_"
+}
+
+---
+_Generated by playwright-ai-framework-ts observability_
+`;
+
+    fs.writeFileSync(markdownPath, md);
+    console.log(`[Observability] Report written to ${markdownPath}`);
+  }
+
+  printSummary(): void {
+    if (!this.enabled || this.metrics.length === 0) return;
+
+    const s = this.summarize();
+    const sep = "=".repeat(60);
+    console.log(`\n${sep}`);
+    console.log("TEST OBSERVABILITY SUMMARY");
+    console.log(sep);
+    console.log(
+      `  Total: ${s.totalTests} | Pass: ${s.passed} | Fail: ${s.failed} | Skip: ${s.skipped}`,
+    );
+    console.log(`  Pass Rate: ${s.passRate}% | Flake Rate: ${s.flakeRate}%`);
+    console.log(`  Heal Events: ${s.healEvents}`);
+    console.log(
+      `  Duration: ${(s.totalDurationMs / 1000).toFixed(1)}s (avg ${(s.avgDurationMs / 1000).toFixed(1)}s)`,
+    );
+    if (s.slowestTests.length > 0) {
+      console.log(
+        `  Slowest: ${s.slowestTests[0].name} (${(s.slowestTests[0].durationMs / 1000).toFixed(1)}s)`,
+      );
+    }
+    console.log(`${sep}\n`);
+  }
+}
+
+let _collector: TestObservabilityCollector | null = null;
+
+export function getObservabilityCollector(): TestObservabilityCollector {
+  if (!_collector) {
+    _collector = new TestObservabilityCollector();
+  }
+  return _collector;
+}
