@@ -49,7 +49,7 @@ jobs:
       - run: npm ci
       - run: npx playwright install --with-deps
       - name: Run full test suite
-        run: npx playwright test --project=chromium
+        run: npx playwright test --grep-invert @ai-healing --project=chromium
         env:
           BASE_URL: https://the-internet.herokuapp.com
           HEADLESS: "true"

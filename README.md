@@ -17,6 +17,8 @@ Targets [The Internet](https://the-internet.herokuapp.com) test application.
 - [API Mocking](#api-mocking)
 - [AI Self-Healing](#ai-self-healing)
 - [BrowserStack Integration](#browserstack-integration)
+- [Jira Integration](#jira-integration)
+- [Test Observability](#test-observability)
 - [CI/CD Setup](#cicd-setup)
 - [Directory Structure](#directory-structure)
 - [Python to TypeScript Migration](#python-to-typescript-migration)
@@ -95,6 +97,15 @@ ENV=test npx playwright test
 | `BROWSERSTACK_ENABLED` | `false` | Run on BrowserStack |
 | `BROWSERSTACK_USERNAME` | — | BrowserStack username |
 | `BROWSERSTACK_ACCESS_KEY` | — | BrowserStack access key |
+| `JIRA_ENABLED` | `false` | Enable Jira test reporting |
+| `JIRA_BASE` | — | Jira instance URL |
+| `JIRA_USER` | — | Jira username/email |
+| `JIRA_TOKEN` | — | Jira API token |
+| `JIRA_JQL` | `project = ABC AND status in ("To Do", "In Progress")` | JQL filter for ticket lookup |
+| `JIRA_DRY_RUN` | `false` | Log instead of posting |
+| `JIRA_TRANSITION_ON_PASS` | — | Transition name on test pass |
+| `JIRA_TRANSITION_ON_FAIL` | — | Transition name on test fail |
+| `OBSERVABILITY_ENABLED` | `false` | Enable test metrics collection |
 | `DEBUG_MSG` | `false` | Verbose debug logging |
 
 ---
@@ -351,6 +362,104 @@ When `BROWSERSTACK_ENABLED=false`, the `browserstack` project is not registered 
 
 ---
 
+## Jira Integration
+
+Automatically post test results to Jira tickets and trigger workflow transitions on pass/fail. Conditionally enabled via environment variables — zero overhead when disabled.
+
+### Setup
+
+Add the following to your `.env.dev` (or relevant `.env` file):
+
+```
+JIRA_ENABLED=true
+JIRA_BASE=https://your-instance.atlassian.net
+JIRA_USER=you@example.com
+JIRA_TOKEN=your_api_token
+```
+
+> **Note:** Set `JIRA_ENABLED=false` to disable entirely. Set `JIRA_DRY_RUN=true` to log what would be posted without making API calls.
+
+### How It Works
+
+1. `JiraReporter` is registered in `playwright.config.ts` as a custom reporter.
+2. Test names and title paths are scanned for Jira ticket patterns (e.g., `PROJ-123`).
+3. On test completion (pass or final retry failure), a formatted comment is posted to the ticket.
+4. If transition env vars are set, the ticket's workflow state is updated automatically.
+5. Tests can also use `test.info().annotations` with type `jira` and the ticket ID as description.
+
+### Linking Tests to Tickets
+
+Include the ticket ID anywhere in the test title path:
+
+```typescript
+test("PROJ-123 login flow works correctly @smoke", async ({ page }) => {
+  // ...
+});
+```
+
+Or annotate the test:
+
+```typescript
+test("login flow works correctly", async ({ page }) => {
+  test.info().annotations.push({ type: "jira", description: "PROJ-123" });
+  // ...
+});
+```
+
+### Architecture Note
+
+The Python version uses pytest hooks (`pytest_runtest_logreport`). The TypeScript version uses Playwright's custom Reporter API (`JiraReporter`), which provides `onTestEnd` callbacks with full access to test metadata and retry state.
+
+---
+
+## Test Observability
+
+Structured per-test metrics collection with JSONL output, summary reports, and error categorization. Tracks flake rate, pass rate, slowest tests, heal events, and failures by category.
+
+### Setup
+
+```
+OBSERVABILITY_ENABLED=true
+```
+
+> **Note:** Set `OBSERVABILITY_ENABLED=false` to disable metric collection entirely. Zero overhead when disabled.
+
+### What Gets Tracked
+
+Each test execution records:
+
+| Field | Description |
+|---|---|
+| `testId` | Unique test identifier |
+| `testName` | Human-readable test name |
+| `suite` | Test suite/describe block |
+| `status` | passed, failed, skipped, timedOut |
+| `durationMs` | Execution time in milliseconds |
+| `retryCount` | Number of retries for this test |
+| `browser` | Browser engine used |
+| `commitSha` | Git commit (auto-detected) |
+| `branch` | Git branch (auto-detected) |
+| `healEvent` | Whether AI healing was triggered |
+| `errorCategory` | Auto-categorized: timeout, element-not-found, navigation, assertion, browser-crash, other |
+
+### Output Files
+
+| File | Location |
+|---|---|
+| JSONL metrics | `test_artifacts/observability/metrics.jsonl` |
+| Summary JSON | `test_artifacts/observability/summary.json` |
+| Markdown report | `test_artifacts/observability/report.md` |
+
+### Running with Observability
+
+```bash
+OBSERVABILITY_ENABLED=true npx playwright test --project=chromium
+```
+
+The summary is printed to the console at session end and a Markdown report is written to `test_artifacts/observability/report.md`.
+
+---
+
 ## CI/CD Setup
 
 A GitHub Actions workflow is provided at `.github/workflows/smoke-full.yml`.
@@ -417,11 +526,16 @@ playwright-ai-framework-ts/
 │   ├── ai-healing-reporter.ts      # Custom Playwright Reporter
 │   ├── browserstack.ts             # BrowserStack capability builder
 │   ├── decorators.ts               # Utility decorators
+│   ├── jira-client.ts              # Jira REST API client
+│   ├── jira-reporter.ts            # Jira Playwright Reporter
 │   ├── network-mocking.ts          # NetworkMocker + templates
+│   ├── observability-reporter.ts   # Observability Playwright Reporter
+│   ├── test-observability.ts       # Test metrics collector
 │   └── visual-regression.ts        # pixelmatch-based visual comparison
 ├── test_artifacts/                  # Generated at runtime (gitignored)
 │   ├── ai/ai_healing_reports/      # AI analysis Markdown reports
 │   ├── allure/                     # Allure results and reports
+│   ├── observability/              # JSONL metrics, summary, report
 │   └── visual/                     # Baselines, current screenshots, diffs
 ├── package.json
 ├── playwright.config.ts
@@ -449,6 +563,10 @@ This project is a full TypeScript port of the [Python Playwright AI Framework](h
 | `@screenshot_on_failure` decorator | Built-in Playwright config (`screenshot: "only-on-failure"`) |
 | `@retry_decorator` | Built-in Playwright config (`retries`) |
 | BrowserStack integration | `utils/browserstack.ts` + config project |
+| `utils/jira_client.py` | `utils/jira-client.ts` |
+| `utils/test_observability.py` | `utils/test-observability.ts` |
+| Jira via `pytest_runtest_logreport` hook | `JiraReporter` (custom Reporter) |
+| Observability via pytest hooks | `ObservabilityReporter` (custom Reporter) |
 | `.github/workflows/` | `.github/workflows/smoke-full.yml` |
 | Allure via pytest plugin | `allure-playwright` package |
 | `requirements_with_versions.txt` | `package.json` (npm) |
