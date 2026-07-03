@@ -1,3 +1,5 @@
+import { settings } from "../config/settings.js";
+
 // ── Invalid Users ──────────────────────────────────────────────────────────
 
 export const INVALID_USERS = {
@@ -23,13 +25,15 @@ export const EXPECTED_MESSAGES = {
 
 // ── Test URLs ─────────────────────────────────────────────────────────────
 
+const BASE = settings.BASE_URL.replace(/\/$/, "");
+
 export const TEST_URLS = {
-  base: "https://the-internet.herokuapp.com",
-  base_url: "https://the-internet.herokuapp.com",
-  login_page: "https://the-internet.herokuapp.com/login",
-  secure_page: "https://the-internet.herokuapp.com/secure",
-  home_page: "https://the-internet.herokuapp.com",
-  logout_url: "https://the-internet.herokuapp.com/logout",
+  base: BASE,
+  base_url: BASE,
+  login_page: `${BASE}/login`,
+  secure_page: `${BASE}/secure`,
+  home_page: BASE,
+  logout_url: `${BASE}/logout`,
 } as const;
 
 // ── Invalid Passwords ─────────────────────────────────────────────────────

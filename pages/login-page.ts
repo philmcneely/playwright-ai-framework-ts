@@ -2,7 +2,8 @@ import { Locator } from "@playwright/test";
 import { BasePage } from "./base-page.js";
 
 export class LoginPage extends BasePage {
-  readonly url = "https://the-internet.herokuapp.com/login";
+  // Relative path so Playwright's configured baseURL (settings.BASE_URL) applies
+  readonly url = "/login";
 
   get usernameField(): Locator {
     return this.page.locator("#username");
