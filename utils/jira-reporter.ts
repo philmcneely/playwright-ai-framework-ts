@@ -10,7 +10,14 @@ import { getJiraClient, type JiraTestResult } from "./jira-client.js";
 
 const TICKET_PATTERN = /\b([A-Z][A-Z0-9]+-\d+)\b/;
 
-function extractTicketId(test: TestCase): string | null {
+/**
+ * Extract a Jira ticket id (e.g. ABC-123) from a test's title path, falling
+ * back to a `jira` annotation. Accepts a structural subset of TestCase so it
+ * can be unit tested without constructing a real TestCase.
+ */
+export function extractTicketId(
+  test: Pick<TestCase, "titlePath" | "annotations">,
+): string | null {
   for (const part of test.titlePath()) {
     const match = part.match(TICKET_PATTERN);
     if (match) return match[1];

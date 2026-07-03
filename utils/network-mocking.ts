@@ -105,9 +105,14 @@ export function createMockDataFile(filePath: string, data: unknown): void {
  * NetworkMocker provides a high-level API for intercepting and mocking
  * network requests during Playwright tests.
  */
+interface RegisteredRoute {
+  pattern: string;
+  handler: (route: Route, request: Request) => Promise<void>;
+}
+
 export class NetworkMocker {
   private page: Page;
-  private mockedRoutes: Map<string, (route: Route, request: Request) => Promise<void>> = new Map();
+  private mockedRoutes: RegisteredRoute[] = [];
   private requestLog: RequestLogEntry[] = [];
   private responseLog: ResponseLogEntry[] = [];
 
@@ -171,34 +176,7 @@ export class NetworkMocker {
     method?: string,
     options: MockOptions = {},
   ): Promise<void> {
-    const status = options.status ?? 200;
-    const contentType = options.contentType ?? "application/json";
-    const extraHeaders = options.headers ?? {};
-
-    const routeHandler = async (route: Route, request: Request) => {
-      // If a specific method is required, skip non-matching requests
-      if (method && request.method() !== method.toUpperCase()) {
-        await route.fallback();
-        return;
-      }
-
-      this._logRequest(request);
-
-      const responseData = await handler(request);
-      const body = typeof responseData === "string" ? responseData : JSON.stringify(responseData);
-      const headers: Record<string, string> = {
-        "Content-Type": contentType,
-        "Access-Control-Allow-Origin": "*",
-        ...extraHeaders,
-      };
-
-      await route.fulfill({ status, headers, body });
-
-      this._logResponse(request.url(), status, headers, responseData);
-    };
-
-    await this.page.route(urlPattern, routeHandler);
-    this.mockedRoutes.set(`fn:${urlPattern}:${method ?? "ALL"}`, routeHandler);
+    await this._registerMock(urlPattern, method, handler, options);
   }
 
   /**
@@ -209,7 +187,7 @@ export class NetworkMocker {
       await route.abort("failed");
     };
     await this.page.route(urlPattern, routeHandler);
-    this.mockedRoutes.set(`fail:${urlPattern}`, routeHandler);
+    this.mockedRoutes.push({ pattern: urlPattern, handler: routeHandler });
   }
 
   /**
@@ -222,7 +200,7 @@ export class NetworkMocker {
       await route.continue();
     };
     await this.page.route(urlPattern, routeHandler);
-    this.mockedRoutes.set(`slow:${urlPattern}`, routeHandler);
+    this.mockedRoutes.push({ pattern: urlPattern, handler: routeHandler });
   }
 
   /**
@@ -236,18 +214,12 @@ export class NetworkMocker {
    * Remove all registered mock routes.
    */
   async clearMocks(): Promise<void> {
-    for (const [, handler] of this.mockedRoutes) {
-      await this.page.unroute("**/*", handler).catch(() => {
-        // route may already have been removed
+    for (const { pattern, handler } of this.mockedRoutes) {
+      await this.page.unroute(pattern, handler).catch(() => {
+        // route may already have been removed (e.g. page closed)
       });
     }
-    // Fallback: try to unroute every recorded pattern
-    for (const key of this.mockedRoutes.keys()) {
-      const parts = key.split(":");
-      const pattern = parts.length >= 2 ? parts.slice(1, -1).join(":") || parts[1] : "**/*";
-      await this.page.unroute(pattern).catch(() => {});
-    }
-    this.mockedRoutes.clear();
+    this.mockedRoutes = [];
     this.requestLog = [];
     this.responseLog = [];
   }
@@ -284,19 +256,34 @@ export class NetworkMocker {
     responseBody: unknown,
     options: MockOptions,
   ): Promise<void> {
+    await this._registerMock(urlPattern, method, () => responseBody, options);
+  }
+
+  /**
+   * Register a route that fulfills matching requests with a (possibly dynamic)
+   * response body. Shared by the static mock helpers and mockWithFunction.
+   */
+  private async _registerMock(
+    urlPattern: string,
+    method: string | undefined,
+    getResponseBody: (request: Request) => unknown | Promise<unknown>,
+    options: MockOptions,
+  ): Promise<void> {
     const status = options.status ?? 200;
     const contentType = options.contentType ?? "application/json";
     const extraHeaders = options.headers ?? {};
 
     const routeHandler = async (route: Route, request: Request) => {
-      if (request.method() !== method.toUpperCase()) {
+      // If a specific method is required, skip non-matching requests
+      if (method && request.method() !== method.toUpperCase()) {
         await route.fallback();
         return;
       }
 
       this._logRequest(request);
 
-      const body = typeof responseBody === "string" ? responseBody : JSON.stringify(responseBody);
+      const responseData = await getResponseBody(request);
+      const body = typeof responseData === "string" ? responseData : JSON.stringify(responseData);
       const headers: Record<string, string> = {
         "Content-Type": contentType,
         "Access-Control-Allow-Origin": "*",
@@ -305,11 +292,11 @@ export class NetworkMocker {
 
       await route.fulfill({ status, headers, body });
 
-      this._logResponse(request.url(), status, headers, responseBody);
+      this._logResponse(request.url(), status, headers, responseData);
     };
 
     await this.page.route(urlPattern, routeHandler);
-    this.mockedRoutes.set(`${method}:${urlPattern}`, routeHandler);
+    this.mockedRoutes.push({ pattern: urlPattern, handler: routeHandler });
   }
 
   private _logRequest(request: Request): void {

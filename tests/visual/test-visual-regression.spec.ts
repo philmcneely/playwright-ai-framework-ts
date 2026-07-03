@@ -110,12 +110,15 @@ test.describe("Visual Regression @visual", () => {
     await page.setContent(COMPLETELY_DIFFERENT_PAGE);
     await page.waitForLoadState("networkidle");
 
-    await expect(
-      visualRegression.compare("major_change", { tolerance: 0.01 }),
-    ).rejects.toThrow("Visual regression failed");
+    const result = await visualRegression.compare("major_change", { tolerance: 0.01 });
+
+    expect(result.passed).toBe(false);
+    expect(result.message).toContain("Visual regression failed");
+    expect(result.diffRatio!).toBeGreaterThan(0.01);
 
     // Verify diff image was saved
     const diffPath = `${VISUAL_DIFF_DIR}/major_change_diff.png`;
+    expect(result.diffPath).toBe(diffPath);
     expect(fs.existsSync(diffPath)).toBe(true);
   });
 

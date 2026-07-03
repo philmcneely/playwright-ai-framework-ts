@@ -555,3 +555,75 @@ test.describe("Advanced Scenarios", { tag: "@api" }, () => {
     expect(responses.length).toBeGreaterThanOrEqual(4);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Test: Clearing Mocks
+// ---------------------------------------------------------------------------
+
+test.describe("Clearing Mocks", { tag: "@api" }, () => {
+  test("cleared mocks no longer intercept requests", async ({ page, apiMocker }) => {
+    await apiMocker.mockGet(`${API}/api/items`, [{ id: 1, name: "Widget" }]);
+
+    await setupPage(page, "<div id='result'></div>");
+
+    const fetchItems = () =>
+      page.evaluate(async (url) => {
+        try {
+          const res = await fetch(url);
+          return { ok: true, status: res.status, body: await res.text() };
+        } catch {
+          return { ok: false, status: 0, body: "" };
+        }
+      }, `${API}/api/items`);
+
+    // Mock is active — request is intercepted and fulfilled
+    const mocked = await fetchItems();
+    expect(mocked.ok).toBe(true);
+    expect(mocked.status).toBe(200);
+    expect(mocked.body).toContain("Widget");
+    expect(apiMocker.getRequestLog().length).toBe(1);
+
+    await apiMocker.clearMocks();
+
+    // Mock removed — the request goes to the (nonexistent) real network and fails
+    const unmocked = await fetchItems();
+    expect(unmocked.ok).toBe(false);
+
+    // Logs were reset and the un-intercepted request was not logged
+    expect(apiMocker.getRequestLog().length).toBe(0);
+    expect(apiMocker.getResponseLog().length).toBe(0);
+  });
+
+  test("clearMocks removes function mocks and network condition routes", async ({
+    page,
+    apiMocker,
+  }) => {
+    await apiMocker.mockWithFunction(`${API}/api/dynamic`, () => ({ dynamic: true }));
+    await apiMocker.simulateNetworkFailure(`${API}/api/broken`);
+
+    await setupPage(page, "<div id='result'></div>");
+
+    const fetchUrl = (url: string) =>
+      page.evaluate(async (u) => {
+        try {
+          const res = await fetch(u);
+          return { ok: true, status: res.status, body: await res.text() };
+        } catch {
+          return { ok: false, status: 0, body: "" };
+        }
+      }, url);
+
+    const dynamic = await fetchUrl(`${API}/api/dynamic`);
+    expect(dynamic.ok).toBe(true);
+    expect(dynamic.body).toContain("dynamic");
+
+    const broken = await fetchUrl(`${API}/api/broken`);
+    expect(broken.ok).toBe(false);
+
+    await apiMocker.clearMocks();
+
+    // Both routes are gone — requests now fail at the real network layer
+    const dynamicAfter = await fetchUrl(`${API}/api/dynamic`);
+    expect(dynamicAfter.ok).toBe(false);
+  });
+});

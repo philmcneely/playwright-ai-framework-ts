@@ -17,15 +17,16 @@ export const settings = {
   DEBUG_MSG: (process.env.DEBUG_MSG || "false").toLowerCase() === "true",
 
   getBrowserOptions() {
+    const args = ["--disable-extensions"];
+    // Sandbox-related flags are only needed (and only safe to disable) in
+    // containerized CI environments.
+    if (process.env.CI) {
+      args.push("--no-sandbox", "--disable-dev-shm-usage");
+    }
     return {
       headless: this.HEADLESS,
       slowMo: this.SLOW_MO,
-      args: [
-        "--disable-blink-features=AutomationControlled",
-        "--disable-extensions",
-        "--no-sandbox",
-        "--disable-dev-shm-usage",
-      ],
+      args,
     };
   },
 };

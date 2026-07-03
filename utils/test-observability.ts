@@ -39,6 +39,29 @@ export interface ObservabilitySummary {
 const OBSERVABILITY_DIR = path.join(ARTIFACT_ROOT, "observability");
 const METRICS_FILE = path.join(OBSERVABILITY_DIR, "metrics.jsonl");
 
+/**
+ * Bucket an error message into a coarse failure category based on keywords.
+ */
+export function categorizeError(message?: string): string | undefined {
+  if (!message) return undefined;
+  const lower = message.toLowerCase();
+  if (lower.includes("timeout") || lower.includes("timed out"))
+    return "timeout";
+  if (
+    lower.includes("locator") ||
+    lower.includes("selector") ||
+    lower.includes("not found")
+  )
+    return "element-not-found";
+  if (lower.includes("navigation") || lower.includes("net::"))
+    return "navigation";
+  if (lower.includes("expect") || lower.includes("assertion"))
+    return "assertion";
+  if (lower.includes("crash") || lower.includes("target closed"))
+    return "browser-crash";
+  return "other";
+}
+
 export class TestObservabilityCollector {
   enabled: boolean;
   private metrics: TestMetric[] = [];

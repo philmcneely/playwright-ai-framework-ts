@@ -31,7 +31,6 @@ Targets [The Internet](https://the-internet.herokuapp.com) test application.
 - **Node.js 22+** — [Download](https://nodejs.org/)
 - **npm** (included with Node.js)
 - **Ollama** (optional, for AI self-healing) — [Install](https://ollama.ai)
-- **Allure CLI** (optional, for Allure reports) — `brew install allure` on macOS
 
 ---
 
@@ -151,9 +150,9 @@ npx playwright test --project=firefox
 # Filter by tag
 npx playwright test --grep @smoke --project=chromium
 
-# Generate and view Allure report
-npm run allure:generate
-npm run allure:open
+# Type check and lint
+npm run typecheck
+npm run lint
 ```
 
 ---
@@ -190,7 +189,7 @@ Uses [pixelmatch](https://github.com/mapbox/pixelmatch) and [pngjs](https://gith
 
 1. **First run** — saves a baseline screenshot.
 2. **Subsequent runs** — compares current screenshot against baseline.
-3. **If diff exceeds tolerance** — test fails and a diff image is saved.
+3. **If diff exceeds tolerance (or dimensions changed)** — `compare()` returns `passed: false` and a diff image is saved. Assert on `result.passed` to fail the test.
 
 ### File Locations
 
@@ -534,7 +533,6 @@ playwright-ai-framework-ts/
 │   └── visual-regression.ts        # pixelmatch-based visual comparison
 ├── test_artifacts/                  # Generated at runtime (gitignored)
 │   ├── ai/ai_healing_reports/      # AI analysis Markdown reports
-│   ├── allure/                     # Allure results and reports
 │   ├── observability/              # JSONL metrics, summary, report
 │   └── visual/                     # Baselines, current screenshots, diffs
 ├── package.json
@@ -568,7 +566,6 @@ This project is a full TypeScript port of the [Python Playwright AI Framework](h
 | Jira via `pytest_runtest_logreport` hook | `JiraReporter` (custom Reporter) |
 | Observability via pytest hooks | `ObservabilityReporter` (custom Reporter) |
 | `.github/workflows/` | `.github/workflows/smoke-full.yml` |
-| Allure via pytest plugin | `allure-playwright` package |
 | `requirements_with_versions.txt` | `package.json` (npm) |
 | Python virtual environment | Node.js (no venv needed) |
 | `python-dotenv` | `dotenv` npm package |
@@ -638,13 +635,3 @@ import { settings } from "./config/settings";
 - Check that `BROWSERSTACK_ENABLED=true` is set
 - Ensure your BrowserStack account is active and has available parallel slots
 
-### Allure reports not generating
-
-Install the Allure CLI, then run:
-
-```bash
-npm run allure:generate
-npm run allure:open
-```
-
-On macOS: `brew install allure`. On Linux, download from [GitHub Releases](https://github.com/allure-framework/allure2/releases).
