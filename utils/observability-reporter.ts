@@ -8,6 +8,7 @@ import type {
 } from "@playwright/test/reporter";
 import { execFileSync } from "child_process";
 import {
+  categorizeError,
   getObservabilityCollector,
   type TestMetric,
 } from "./test-observability.js";
@@ -24,26 +25,6 @@ function getGitInfo(): { commitSha?: string; branch?: string } {
   } catch {
     return {};
   }
-}
-
-function categorizeError(message?: string): string | undefined {
-  if (!message) return undefined;
-  const lower = message.toLowerCase();
-  if (lower.includes("timeout") || lower.includes("timed out"))
-    return "timeout";
-  if (
-    lower.includes("locator") ||
-    lower.includes("selector") ||
-    lower.includes("not found")
-  )
-    return "element-not-found";
-  if (lower.includes("navigation") || lower.includes("net::"))
-    return "navigation";
-  if (lower.includes("expect") || lower.includes("assertion"))
-    return "assertion";
-  if (lower.includes("crash") || lower.includes("target closed"))
-    return "browser-crash";
-  return "other";
 }
 
 class ObservabilityReporter implements Reporter {

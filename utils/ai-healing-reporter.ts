@@ -23,6 +23,7 @@ import {
   ensureOllamaReady,
   type HealingResponse,
 } from "./ai-healing.js";
+import { categorizeError } from "./test-observability.js";
 
 class AIHealingReporter implements Reporter {
   private failCounts = new Map<string, number>();
@@ -80,7 +81,7 @@ class AIHealingReporter implements Reporter {
     const context: Record<string, string> = {
       test_name: test.title,
       error_message: errorMessage,
-      error_type: error?.message?.split(":")[0] || "Unknown",
+      error_type: categorizeError(error?.message) || "Unknown",
       test_file: test.location.file,
     };
 
