@@ -15,7 +15,6 @@ export interface JiraConfig {
   baseUrl: string;
   username: string;
   token: string;
-  jql: string;
   dryRun: boolean;
   transitionOnPass?: string;
   transitionOnFail?: string;
@@ -27,9 +26,6 @@ function loadConfig(): JiraConfig {
     baseUrl: process.env.JIRA_BASE || "",
     username: process.env.JIRA_USER || "",
     token: process.env.JIRA_TOKEN || "",
-    jql:
-      process.env.JIRA_JQL ||
-      'project = ABC AND status in ("To Do", "In Progress")',
     dryRun: (process.env.JIRA_DRY_RUN || "false").toLowerCase() === "true",
     transitionOnPass: process.env.JIRA_TRANSITION_ON_PASS,
     transitionOnFail: process.env.JIRA_TRANSITION_ON_FAIL,

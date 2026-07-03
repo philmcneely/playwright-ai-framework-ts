@@ -11,19 +11,21 @@
     "test:headed": "HEADLESS=false playwright test",
     "test:debug": "PWDEBUG=1 playwright test",
     "report": "playwright show-report",
-    "allure:generate": "allure generate test_artifacts/allure/allure-results -o test_artifacts/allure/allure-report --clean",
-    "allure:open": "allure open test_artifacts/allure/allure-report"
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint ."
   },
   "devDependencies": {
+    "@eslint/js": "^9.0.0",
     "@playwright/test": "^1.49.0",
     "@types/node": "^22.0.0",
     "@types/pixelmatch": "^5.2.6",
     "@types/pngjs": "^6.0.5",
-    "allure-playwright": "^3.0.0",
     "dotenv": "^16.4.0",
+    "eslint": "^9.0.0",
     "ollama": "^0.5.0",
     "pixelmatch": "^6.0.0",
     "pngjs": "^7.0.0",
-    "typescript": "^5.5.0"
+    "typescript": "^5.5.0",
+    "typescript-eslint": "^8.0.0"
   }
 }
