@@ -35,6 +35,11 @@ export interface CompareResult {
   diffPath?: string;
 }
 
+/** Restrict snapshot names to a safe filename charset (no path separators). */
+function sanitizeName(name: string): string {
+  return name.replace(/[^a-zA-Z0-9_-]/g, "_");
+}
+
 export class VisualRegression {
   private page: Page;
 
@@ -48,14 +53,16 @@ export class VisualRegression {
   /**
    * Compare current page/element screenshot against a stored baseline.
    * On first run (no baseline), saves the screenshot as baseline and returns a skip result.
-   * On subsequent runs, compares and throws if diff exceeds tolerance.
+   * On subsequent runs, compares and returns `passed: false` if the diff exceeds
+   * tolerance or the dimensions changed — the caller decides whether to fail the test.
    */
   async compare(name: string, options: CompareOptions = {}): Promise<CompareResult> {
     const { selector, fullPage = false, tolerance = 0.01 } = options;
 
-    const baselinePath = path.join(VISUAL_BASELINE_DIR, `${name}.png`);
-    const currentPath = path.join(VISUAL_CURRENT_DIR, `${name}.png`);
-    const diffPath = path.join(VISUAL_DIFF_DIR, `${name}_diff.png`);
+    const safeName = sanitizeName(name);
+    const baselinePath = path.join(VISUAL_BASELINE_DIR, `${safeName}.png`);
+    const currentPath = path.join(VISUAL_CURRENT_DIR, `${safeName}.png`);
+    const diffPath = path.join(VISUAL_DIFF_DIR, `${safeName}_diff.png`);
 
     // Take screenshot
     const screenshotBuffer = await this.takeScreenshot(selector, fullPage);
@@ -74,16 +81,24 @@ export class VisualRegression {
 
     // Read baseline and current PNGs
     const baselinePng = PNG.sync.read(fs.readFileSync(baselinePath));
-    let currentPng: PNG = PNG.sync.read(screenshotBuffer);
+    const currentPng: PNG = PNG.sync.read(screenshotBuffer);
 
-    // If sizes differ, resize current to match baseline dimensions
+    // Fail fast on dimension mismatch — padding/cropping would only mask the
+    // real problem (viewport or element size changed since the baseline).
     if (
       baselinePng.width !== currentPng.width ||
       baselinePng.height !== currentPng.height
     ) {
-      currentPng = this.resizeToMatch(currentPng, baselinePng.width, baselinePng.height);
-      // Rewrite the resized current image
-      fs.writeFileSync(currentPath, PNG.sync.write(currentPng));
+      return {
+        passed: false,
+        message:
+          `Visual regression failed for "${name}": viewport dimensions changed ` +
+          `(baseline ${baselinePng.width}x${baselinePng.height}, ` +
+          `current ${currentPng.width}x${currentPng.height}). ` +
+          `Delete the baseline to regenerate it at the new dimensions.`,
+        baselinePath,
+        currentPath,
+      };
     }
 
     const { width, height } = baselinePng;
@@ -109,9 +124,15 @@ export class VisualRegression {
 
       const pct = (diffRatio * 100).toFixed(2);
       const tolPct = (tolerance * 100).toFixed(2);
-      throw new Error(
-        `Visual regression failed for "${name}": ${pct}% pixels differ (tolerance: ${tolPct}%). Diff saved to ${diffPath}`,
-      );
+      return {
+        passed: false,
+        message: `Visual regression failed for "${name}": ${pct}% pixels differ (tolerance: ${tolPct}%). Diff saved to ${diffPath}`,
+        diffRatio,
+        diffPixels: numDiffPixels,
+        baselinePath,
+        currentPath,
+        diffPath,
+      };
     }
 
     return {
@@ -140,38 +161,13 @@ export class VisualRegression {
     );
   }
 
-  /**
-   * Resize a PNG to target dimensions by creating a new image and copying pixel data.
-   * Pixels outside the source bounds are left transparent.
-   */
-  private resizeToMatch(source: PNG, targetWidth: number, targetHeight: number): PNG {
-    const resized = new PNG({ width: targetWidth, height: targetHeight, fill: true });
-    // Fill with transparent black
-    resized.data.fill(0);
-
-    const copyWidth = Math.min(source.width, targetWidth);
-    const copyHeight = Math.min(source.height, targetHeight);
-
-    for (let y = 0; y < copyHeight; y++) {
-      for (let x = 0; x < copyWidth; x++) {
-        const srcIdx = (y * source.width + x) * 4;
-        const dstIdx = (y * targetWidth + x) * 4;
-        resized.data[dstIdx] = source.data[srcIdx];
-        resized.data[dstIdx + 1] = source.data[srcIdx + 1];
-        resized.data[dstIdx + 2] = source.data[srcIdx + 2];
-        resized.data[dstIdx + 3] = source.data[srcIdx + 3];
-      }
-    }
-
-    return resized;
-  }
 }
 
 /**
  * Delete a specific baseline image.
  */
 export function resetBaseline(name: string): boolean {
-  const baselinePath = path.join(VISUAL_BASELINE_DIR, `${name}.png`);
+  const baselinePath = path.join(VISUAL_BASELINE_DIR, `${sanitizeName(name)}.png`);
   if (fs.existsSync(baselinePath)) {
     fs.unlinkSync(baselinePath);
     return true;
