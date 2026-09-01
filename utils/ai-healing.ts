@@ -5,7 +5,7 @@
  * queries Ollama for healing analysis, and generates detailed healing reports.
  *
  * Environment Variables:
- *   OLLAMA_MODEL            - Ollama model to use (default: llama3.1:8b)
+ *   OLLAMA_MODEL            - Ollama model to use (default: qwen3:8b)
  *   AI_HEALING_ENABLED      - Enable AI healing (true|false, default: false)
  *   AI_HEALING_CONFIDENCE   - Confidence threshold (default: 0.7)
  *   OLLAMA_HOST             - Ollama server URL (default: http://localhost:11434)
@@ -54,7 +54,7 @@ export class OllamaAIHealingService {
   private client: Ollama;
 
   constructor() {
-    this.model = process.env.OLLAMA_MODEL || "llama3.1:8b";
+    this.model = process.env.OLLAMA_MODEL || "qwen3:8b";
     this.enabled =
       (process.env.AI_HEALING_ENABLED || "false").toLowerCase() === "true";
     this.confidenceThreshold = parseFloat(
