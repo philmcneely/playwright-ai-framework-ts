@@ -8,3 +8,7 @@ test_artifacts/
 !.env.example
 playwright-report/
 test-results/
+
+# Stability index runtime data
+data/stability_history.json
+data/stability_history.json.tmp
