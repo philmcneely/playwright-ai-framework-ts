@@ -2,90 +2,17 @@
  * Unit Tests for Pure Logic
  *
  * Runs under the Playwright test runner but does not use the page fixture,
- * so no browser is launched. Covers response parsing, error categorization,
+ * so no browser is launched. Covers error categorization,
  * ticket extraction, and observability summarization.
  */
 
 import { test, expect } from "@playwright/test";
-import { OllamaAIHealingService } from "../../utils/ai-healing.js";
 import {
   categorizeError,
   TestObservabilityCollector,
   type TestMetric,
 } from "../../utils/test-observability.js";
 import { extractTicketId } from "../../utils/jira-reporter.js";
-
-// ---------------------------------------------------------------------------
-// parseOllamaResponse — all fallback strategies
-// ---------------------------------------------------------------------------
-
-test.describe("parseOllamaResponse", () => {
-  const service = new OllamaAIHealingService();
-
-  test("returns null for empty response", () => {
-    expect(service.parseOllamaResponse("")).toBeNull();
-  });
-
-  test("strategy 1: parses JSON inside ```json code block", () => {
-    const response =
-      'Here is my analysis:\n```json\n{"analysis": "selector changed", "confidence": 0.9}\n```\nDone.';
-    const parsed = service.parseOllamaResponse(response);
-    expect(parsed?.analysis).toBe("selector changed");
-    expect(parsed?.confidence).toBe(0.9);
-  });
-
-  test("strategy 2: parses JSON inside a generic code block", () => {
-    const response = '```\n{"analysis": "timing issue", "confidence": 0.7}\n```';
-    const parsed = service.parseOllamaResponse(response);
-    expect(parsed?.analysis).toBe("timing issue");
-    expect(parsed?.confidence).toBe(0.7);
-  });
-
-  test("strategy 3: extracts JSON-like structure embedded in prose", () => {
-    const response =
-      'The model says {"analysis": "flaky wait", "confidence": 0.6} which seems right.';
-    const parsed = service.parseOllamaResponse(response);
-    expect(parsed?.analysis).toBe("flaky wait");
-    expect(parsed?.confidence).toBe(0.6);
-  });
-
-  test("strategy 4: parses when the entire response is bare JSON", () => {
-    const response = '{"analysis": "clean json", "confidence": 0.95}';
-    const parsed = service.parseOllamaResponse(response);
-    expect(parsed?.analysis).toBe("clean json");
-    expect(parsed?.confidence).toBe(0.95);
-  });
-
-  test("strategy 5: strips non-JSON leading/trailing text inside a code block", () => {
-    // Code block with a language hint — candidate starts with "js", so the
-    // direct parse fails and the leading-noise stripper has to kick in.
-    const response = '```js\n{"analysis": "stripped", "confidence": 0.8}\n```';
-    const parsed = service.parseOllamaResponse(response);
-    expect(parsed?.analysis).toBe("stripped");
-    expect(parsed?.confidence).toBe(0.8);
-  });
-
-  test("strategy 6: manual regex extraction from malformed JSON", () => {
-    // No braces at all — direct parse, cleanup, and pattern match all fail,
-    // but the key/value pairs are still regex-extractable.
-    const response =
-      '"analysis": "locator drifted", "root_cause": "id renamed", "confidence": 0.55';
-    const parsed = service.parseOllamaResponse(response);
-    expect(parsed?.analysis).toBe("locator drifted");
-    expect(parsed?.root_cause).toBe("id renamed");
-    expect(parsed?.confidence).toBe(0.55);
-    expect(parsed?.suggested_fix).toContain("Manual review required");
-  });
-
-  test("unparseable prose falls through to manual extraction defaults", () => {
-    const response = "I could not analyze this failure at all, sorry.";
-    const parsed = service.parseOllamaResponse(response);
-    expect(parsed?.analysis).toBe(response);
-    expect(parsed?.root_cause).toBe("Could not extract root cause");
-    expect(parsed?.confidence).toBe(0.3);
-    expect(parsed?.suggested_fix).toContain("Manual review required");
-  });
-});
 
 // ---------------------------------------------------------------------------
 // categorizeError — keyword matching

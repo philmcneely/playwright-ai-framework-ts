@@ -12,7 +12,6 @@ export default defineConfig({
   timeout: settings.TIMEOUT,
   retries: settings.RETRY_COUNT,
   reporter: [
-    ["./utils/ai-healing-reporter.ts"],
     ["./utils/jira-reporter.ts"],
     ["./utils/observability-reporter.ts"],
     ["./utils/stability-reporter.ts"],

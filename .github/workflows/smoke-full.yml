@@ -90,7 +90,7 @@ jobs:
           key: playwright-${{ runner.os }}-${{ steps.playwright-version.outputs.version }}
       - run: npx playwright install --with-deps chromium
       - name: Run full test suite
-        run: npx playwright test --grep-invert @ai-healing --project=chromium
+        run: npx playwright test --project=chromium
         env:
           BASE_URL: http://localhost:5000
           HEADLESS: "true"
