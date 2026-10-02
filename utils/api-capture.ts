@@ -99,19 +99,27 @@ export class APICapture {
   }
 
   async onResponse(response: Response): Promise<void> {
-    const url = response.url();
-    const captured = this.pending.get(url);
-    if (!captured) return;
-    this.pending.delete(url);
-    captured.status = response.status();
-    captured.responseHeaders = response.headers();
+    // Everything here is best-effort: a response can be torn down with its
+    // page/context mid-flight (Playwright then throws "not bound in the
+    // connection"), so no access is allowed to escape as an unhandled
+    // rejection and disturb the test.
     try {
-      const body = await response.body();
-      captured.responseBody = body.toString("utf-8").slice(0, MAX_BODY);
+      const url = response.url();
+      const captured = this.pending.get(url);
+      if (!captured) return;
+      this.pending.delete(url);
+      captured.status = response.status();
+      captured.responseHeaders = response.headers();
+      try {
+        const body = await response.body();
+        captured.responseBody = body.toString("utf-8").slice(0, MAX_BODY);
+      } catch {
+        captured.responseBody = "<could not read body>";
+      }
+      this.requests.push(captured);
     } catch {
-      captured.responseBody = "<could not read body>";
+      // Response no longer bound — drop it silently.
     }
-    this.requests.push(captured);
   }
 
   /** Serialize all captured requests to JSON. */
