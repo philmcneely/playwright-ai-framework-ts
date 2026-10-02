@@ -300,6 +300,34 @@ directly.
 
 `.mcp.json` registers `npx playwright run-test-mcp-server`, exposing browser + test tools
 (`browser_snapshot`, `browser_generate_locator`, `test_run`, `test_debug`, …) to the agents.
+
+## Locator Healing CLI (`npm run heal`)
+
+`scripts/heal.mjs` is the out-of-band healer — the engine for the overnight
+heal→PR flow. It runs failing tests, reproduces each failure in a real browser to
+read the **live accessibility snapshot**, asks a configurable model for a resilient
+semantic locator, applies it, and **re-runs to verify**. It heals **locators only**,
+never assertions or intent; a failure it can't make pass is reverted and flagged for
+a human (likely an app bug, not drift).
+
+The model is any **OpenAI-compatible** endpoint:
+
+```bash
+# local / fleet proxy (no key); route fleet models through their proxy for attribution
+BASE_URL=https://app.example.com \
+HEAL_BASE_URL=http://<proxy-host>:3025/v1 \
+HEAL_MODEL='ollama@localhost/qwen3.8-27b:latest' \
+npm run heal -- --grep "login" --open-pr
+
+# OpenRouter
+HEAL_BASE_URL=https://openrouter.ai/api/v1 HEAL_MODEL='...' HEAL_API_KEY=sk-... npm run heal
+```
+
+Flags: `--grep <name>` (scope to tests), `--max N` (cap failures handled), `--open-pr`
+(assemble one PR with the per-failure decisions and the untouched/for-human list).
+Run it nightly after the suite (e.g. a scheduled job on a host with LAN access to the
+model and the app) to get a morning PR.
+
 ## BrowserStack Integration
 
 Run tests on real browsers in the cloud via [BrowserStack Automate](https://www.browserstack.com/).

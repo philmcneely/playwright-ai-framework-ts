@@ -12,7 +12,8 @@
     "test:debug": "PWDEBUG=1 playwright test",
     "report": "playwright show-report",
     "typecheck": "tsc --noEmit",
-    "lint": "eslint ."
+    "lint": "eslint .",
+    "heal": "node scripts/heal.mjs"
   },
   "devDependencies": {
     "@eslint/js": "^9.0.0",
