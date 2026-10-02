@@ -1,6 +1,11 @@
 import { defineConfig, devices } from "@playwright/test";
 import { settings } from "./config/settings.js";
 import { isBrowserStackEnabled, getBrowserStackCaps } from "./utils/browserstack.js";
+import { ZAPIntegration } from "./utils/zap-integration.js";
+
+// Route traffic through OWASP ZAP when ZAP_ENABLED=true (QA-24).
+const zap = new ZAPIntegration();
+const zapProxy = zap.getBrowserProxyConfig().proxy;
 
 export default defineConfig({
   testDir: "./tests",
@@ -10,6 +15,7 @@ export default defineConfig({
     ["./utils/ai-healing-reporter.ts"],
     ["./utils/jira-reporter.ts"],
     ["./utils/observability-reporter.ts"],
+    ["./utils/stability-reporter.ts"],
     ["html"],
     ["list"],
   ],
@@ -20,6 +26,7 @@ export default defineConfig({
     video: settings.VIDEO_ON_FAILURE ? "retain-on-failure" : "off",
     trace: "retain-on-failure",
     launchOptions: settings.getBrowserOptions(),
+    ...(zapProxy ? { proxy: zapProxy } : {}),
   },
   projects: [
     {

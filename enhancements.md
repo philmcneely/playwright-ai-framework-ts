@@ -120,3 +120,48 @@ Future improvements and ideas for the Playwright AI Test Framework (TypeScript).
 - [x] BrowserStack integration
 - [x] GitHub Actions CI/CD
 - [x] Documentation (README + this roadmap)
+- [x] **Stability index + flaky-test quarantine** (QA-04)
+- [x] **API request/response capture** (QA-19)
+- [x] **OWASP ZAP passive scanning** (QA-24)
+
+---
+
+## QA Quick Wins (delivered)
+
+Mirror of the Python framework's QA quick wins, adapted to the Playwright runner.
+
+### QA-04: Stability Index
+
+Tracks pass/fail per test across the last 10 runs (`data/stability_history.json`,
+override with `STABILITY_HISTORY_FILE`). `utils/stability-reporter.ts` records each
+attempt; `fixtures/index.ts` quarantines tests whose stability drops below
+`STABILITY_THRESHOLD` (default `0.7`).
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| `STABILITY_THRESHOLD` | `0.7` | Tests below this score are quarantined |
+
+> Playwright has no `xfail`, so quarantined tests are **skipped** with a clear
+> reason (annotated `quarantined`) rather than run-and-ignored — they stop blocking
+> CI while their instability stays visible in the report.
+
+### QA-19: API Request/Response Capture
+
+`utils/api-capture.ts` is wired onto the `page` fixture (auto). Static assets are
+filtered out and response bodies capped at 10 KB. On failure, captured traffic is
+attached to the report as `API Requests: {test}` (JSON). Always active, no config.
+
+### QA-24: OWASP ZAP Passive Scanning
+
+`utils/zap-integration.ts` optionally routes browser traffic through ZAP.
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| `ZAP_ENABLED` | `false` | Enable the ZAP proxy integration |
+| `ZAP_API_KEY` | `""` | ZAP API key (if configured) |
+
+**Setup:**
+1. Start ZAP: `docker run -p 8080:8080 zaproxy/zap-stable zap.sh -daemon -port 8080 -config api.disablekey=true`
+2. Set `ZAP_ENABLED=true` and run tests — traffic routes through ZAP.
+
+ZAP's REST API is reached via the global `fetch` — **no new dependency**.
