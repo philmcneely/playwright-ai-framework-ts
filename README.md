@@ -88,7 +88,7 @@ ENV=test npx playwright test
 | `SCREENSHOT_ON_FAILURE` | `true` | Capture screenshot on failure |
 | `VIDEO_ON_FAILURE` | `true` | Record video, retained on failure |
 | `AI_HEALING_ENABLED` | `false` | Enable AI self-healing analysis |
-| `OLLAMA_MODEL` | `llama3.1:8b` | Ollama model for healing |
+| `OLLAMA_MODEL` | `qwen3:8b` | Ollama model for healing |
 | `OLLAMA_HOST` | `http://localhost:11434` | Ollama server URL |
 | `OLLAMA_TEMPERATURE` | `0.1` | LLM temperature |
 | `AI_HEALING_CONFIDENCE` | `0.7` | Confidence threshold for healing suggestions |
@@ -292,7 +292,7 @@ When a test fails after all retries, the AI healing system queries a local [Olla
 
 ```bash
 # Text-only (faster, smaller)
-ollama pull llama3.1:8b
+ollama pull qwen3:8b
 
 # Vision + text (can analyze failure screenshots)
 ollama pull llava:7b
@@ -302,7 +302,7 @@ ollama pull llava:7b
 
 ```
 AI_HEALING_ENABLED=true
-OLLAMA_MODEL=llama3.1:8b
+OLLAMA_MODEL=qwen3:8b
 ```
 
 ### How It Works
