@@ -22,7 +22,6 @@
     "@types/pngjs": "^6.0.5",
     "dotenv": "^16.4.0",
     "eslint": "^9.0.0",
-    "ollama": "^0.5.0",
     "pixelmatch": "^6.0.0",
     "pngjs": "^7.0.0",
     "typescript": "^5.5.0",

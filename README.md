@@ -15,7 +15,7 @@ Targets [The Internet](https://the-internet.herokuapp.com) test application.
 - [Multi-Browser Support](#multi-browser-support)
 - [Visual Regression Testing](#visual-regression-testing)
 - [API Mocking](#api-mocking)
-- [AI Self-Healing](#ai-self-healing)
+- [AI Test Agents](#ai-test-agents-planner--generator--healer)
 - [BrowserStack Integration](#browserstack-integration)
 - [Jira Integration](#jira-integration)
 - [Test Observability](#test-observability)
@@ -30,7 +30,7 @@ Targets [The Internet](https://the-internet.herokuapp.com) test application.
 
 - **Node.js 22+** — [Download](https://nodejs.org/)
 - **npm** (included with Node.js)
-- **Ollama** (optional, for AI self-healing) — [Install](https://ollama.ai)
+- **An agent loop host** (optional, for the AI test agents) — Claude Code, `opencode`, `codex`, or VS Code
 
 ---
 
@@ -87,12 +87,6 @@ ENV=test npx playwright test
 | `RETRY_COUNT` | `3` | Number of retries on failure |
 | `SCREENSHOT_ON_FAILURE` | `true` | Capture screenshot on failure |
 | `VIDEO_ON_FAILURE` | `true` | Record video, retained on failure |
-| `AI_HEALING_ENABLED` | `false` | Enable AI self-healing analysis |
-| `OLLAMA_MODEL` | `qwen3:8b` | Ollama model for healing |
-| `OLLAMA_HOST` | `http://localhost:11434` | Ollama server URL |
-| `OLLAMA_TEMPERATURE` | `0.1` | LLM temperature |
-| `AI_HEALING_CONFIDENCE` | `0.7` | Confidence threshold for healing suggestions |
-| `AI_HEALING_CONTEXT_WINDOW` | `5000` | Max DOM characters sent to the model |
 | `BROWSERSTACK_ENABLED` | `false` | Run on BrowserStack |
 | `BROWSERSTACK_USERNAME` | — | BrowserStack username |
 | `BROWSERSTACK_ACCESS_KEY` | — | BrowserStack access key |
@@ -281,58 +275,31 @@ const template = getMockTemplate("unauthorized"); // 401 response
 
 ---
 
-## AI Self-Healing
+## AI Test Agents (Planner / Generator / Healer)
 
-When a test fails after all retries, the AI healing system queries a local [Ollama](https://ollama.ai) instance to analyze the failure and suggest fixes. Reports are saved as Markdown files.
-
-### Setup
-
-1. Install Ollama: https://ollama.ai
-2. Pull a model:
+v2 uses Playwright's official **Test Agents** instead of a bespoke healing engine. They are Markdown
+agent prompts in `.claude/agents/` plus an MCP server declared in `.mcp.json`, scaffolded with:
 
 ```bash
-# Text-only (faster, smaller)
-ollama pull qwen3:8b
-
-# Vision + text (can analyze failure screenshots)
-ollama pull llava:7b
+npx playwright init-agents --loop=claude   # or: codex | opencode | vscode
 ```
 
-3. Enable in your `.env` file:
+- **Planner** explores the app through the Playwright MCP server and writes a Markdown test plan under `specs/`.
+- **Generator** turns a plan item into a test, driving a real browser via MCP (accessibility snapshots, not pixels).
+- **Healer** runs the suite, debugs failures in a real browser via MCP, updates **locators** (never the test's
+  intent), and marks a test `test.fixme()` only when confident the test is right and the app is at fault.
 
-```
-AI_HEALING_ENABLED=true
-OLLAMA_MODEL=qwen3:8b
-```
+### Using any model (OpenRouter / local / fleet)
 
-### How It Works
+The model comes from the agent loop host. `--loop=claude` uses Claude; `--loop=opencode` (or `codex`) points
+at any **OpenAI-compatible** endpoint — set its base URL / model / key to OpenRouter, a local server, or a
+fleet proxy. Always route fleet models through their proxy so usage is attributed; never call a model endpoint
+directly.
 
-1. `AIHealingReporter` is registered in `playwright.config.ts` as a custom reporter.
-2. On each test failure, the reporter tracks retry counts.
-3. After the **final** failure (all retries exhausted), it triggers healing:
-   - Reads the test source file
-   - Collects error details and any failure screenshots
-   - Sends a structured prompt to Ollama
-   - Parses the JSON response (with 6 fallback parsing strategies)
-   - Writes a Markdown report to `test_artifacts/ai/ai_healing_reports/`
-   - Optionally saves a healed `.ts` file if the model provides updated code
+### MCP server
 
-### Running the Demo
-
-A dedicated test exists to trigger AI healing intentionally:
-
-```bash
-AI_HEALING_ENABLED=true npx playwright test --grep @trigger_ai_healing --project=chromium
-```
-
-Reports appear in `test_artifacts/ai/ai_healing_reports/`.
-
-### Architecture Note
-
-The Python version uses `pytest_runtest_makereport` hooks. The TypeScript version uses Playwright's custom Reporter API (`AIHealingReporter`), which receives `onTestEnd` callbacks with full access to test metadata, errors, and attachments.
-
----
-
+`.mcp.json` registers `npx playwright run-test-mcp-server`, exposing browser + test tools
+(`browser_snapshot`, `browser_generate_locator`, `test_run`, `test_debug`, …) to the agents.
 ## BrowserStack Integration
 
 Run tests on real browsers in the cloud via [BrowserStack Automate](https://www.browserstack.com/).
@@ -511,8 +478,6 @@ playwright-ai-framework-ts/
 │   ├── login-page.ts               # Login page object
 │   └── secure-page.ts              # Secure area page object
 ├── tests/
-│   ├── ai-healing/
-│   │   └── test-ai-healing-trigger.spec.ts
 │   ├── api/
 │   │   └── test-api-mocking.spec.ts
 │   ├── login/
@@ -521,8 +486,6 @@ playwright-ai-framework-ts/
 │   └── visual/
 │       └── test-visual-regression.spec.ts
 ├── utils/
-│   ├── ai-healing.ts               # Ollama healing service
-│   ├── ai-healing-reporter.ts      # Custom Playwright Reporter
 │   ├── browserstack.ts             # BrowserStack capability builder
 │   ├── decorators.ts               # Utility decorators
 │   ├── jira-client.ts              # Jira REST API client
@@ -532,7 +495,6 @@ playwright-ai-framework-ts/
 │   ├── test-observability.ts       # Test metrics collector
 │   └── visual-regression.ts        # pixelmatch-based visual comparison
 ├── test_artifacts/                  # Generated at runtime (gitignored)
-│   ├── ai/ai_healing_reports/      # AI analysis Markdown reports
 │   ├── observability/              # JSONL metrics, summary, report
 │   └── visual/                     # Baselines, current screenshots, diffs
 ├── package.json
@@ -554,7 +516,6 @@ This project is a full TypeScript port of the [Python Playwright AI Framework](h
 | `config/artifact_paths.py` | `config/artifact-paths.ts` |
 | `pages/` (Page Object Model) | `pages/` (Page Object Model) |
 | `data/test_data.py` | `data/test-data.ts` |
-| `utils/ai_healing.py` | `utils/ai-healing.ts` |
 | `pytest_runtest_makereport` hook | `AIHealingReporter` (custom Reporter) |
 | `utils/visual_regression.py` (OpenCV) | `utils/visual-regression.ts` (pixelmatch + pngjs) |
 | `utils/network_mocking.py` | `utils/network-mocking.ts` |

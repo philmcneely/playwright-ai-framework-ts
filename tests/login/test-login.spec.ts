@@ -59,14 +59,4 @@ test.describe("Login Tests", () => {
     expect(cleared).toBe("");
   });
 
-  test("AI healing trigger @ai-healing", async ({ app }) => {
-    test.skip(
-      process.env.AI_HEALING_ENABLED !== "true",
-      "AI healing not enabled",
-    );
-    await app.loginPage.navigate();
-    await app.loginPage.enterUsername("tomsmith");
-    await app.loginPage.enterPasswordX("SuperSecretPassword!");
-    await app.loginPage.clickLogin();
-  });
 });

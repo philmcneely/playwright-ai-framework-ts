@@ -114,7 +114,7 @@ Future improvements and ideas for the Playwright AI Test Framework (TypeScript).
 - [x] Custom fixtures via `test.extend()`
 - [x] Network mocking utility with templates
 - [x] Visual regression with pixelmatch
-- [x] AI self-healing service and reporter
+- [x] AI test agents (official Playwright planner/generator/healer + MCP)
 - [x] Login test suite (valid, invalid, security attacks)
 - [x] Screenshot and retry via Playwright config
 - [x] BrowserStack integration
