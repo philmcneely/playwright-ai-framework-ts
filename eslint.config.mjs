@@ -21,4 +21,17 @@ export default tseslint.config(
       ],
     },
   },
+  {
+    // Node CLI scripts (heal.mjs etc.) — provide Node + fetch globals.
+    files: ["scripts/**/*.mjs"],
+    languageOptions: {
+      globals: {
+        console: "readonly",
+        process: "readonly",
+        fetch: "readonly",
+        URL: "readonly",
+        setTimeout: "readonly",
+      },
+    },
+  },
 );
