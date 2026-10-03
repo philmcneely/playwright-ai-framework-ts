@@ -2,6 +2,8 @@
 
 A production-ready Playwright test framework with AI-powered self-healing, visual regression testing, API mocking, and BrowserStack integration. TypeScript port of the [Python version](https://github.com/philmcneely/playwright-ai-framework).
 
+> 📖 **Using the AI agents & heal CLI, and the test-author workflow (with or without an agent):** see **[docs/USAGE.md](docs/USAGE.md)**.
+
 Targets [The Internet](https://the-internet.herokuapp.com) test application.
 
 ---
