@@ -6,7 +6,7 @@ import {
   PATH_TRAVERSAL_PAYLOADS,
 } from "../../data/test-data.js";
 
-test.describe("Security Attack Tests @security", () => {
+test.describe("Security Attack Tests", { tag: ["@security", "@login", "@negative", "@regression"] }, () => {
   test.describe("SQL Injection", () => {
     for (const [index, payload] of SQL_INJECTION_PAYLOADS.entries()) {
       test(`SQL injection in username: payload ${index}`, async ({ app }) => {

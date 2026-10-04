@@ -10,19 +10,24 @@ const zapProxy = zap.getBrowserProxyConfig().proxy;
 export default defineConfig({
   testDir: "./tests",
   timeout: settings.TIMEOUT,
-  retries: settings.RETRY_COUNT,
+  // Retries and workers are env-driven: PW_RETRIES (default 0), PW_WORKERS (default: Playwright's own).
+  retries: Number(process.env.PW_RETRIES ?? 0),
+  workers: process.env.PW_WORKERS ? Number(process.env.PW_WORKERS) : undefined,
+  outputDir: "results/artifacts",
   reporter: [
     ["./utils/jira-reporter.ts"],
     ["./utils/observability-reporter.ts"],
     ["./utils/stability-reporter.ts"],
-    ["html"],
     ["list"],
+    ["html", { outputFolder: "results/html", open: "never" }],
+    ["junit", { outputFile: "results/junit.xml" }],
+    ["json", { outputFile: "results/results.json" }],
   ],
   use: {
     baseURL: settings.BASE_URL,
     headless: settings.HEADLESS,
-    screenshot: settings.SCREENSHOT_ON_FAILURE ? "only-on-failure" : "off",
-    video: settings.VIDEO_ON_FAILURE ? "retain-on-failure" : "off",
+    screenshot: "only-on-failure",
+    video: "off",
     trace: "retain-on-failure",
     launchOptions: settings.getBrowserOptions(),
     ...(zapProxy ? { proxy: zapProxy } : {}),

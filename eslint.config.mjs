@@ -8,6 +8,7 @@ export default tseslint.config(
       "dist/",
       "test_artifacts/",
       "playwright-report/",
+      "results/",
       "test-results/",
     ],
   },
