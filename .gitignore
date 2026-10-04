@@ -7,6 +7,7 @@ test_artifacts/
 .env.prod
 !.env.example
 playwright-report/
+results/
 test-results/
 
 # Stability index runtime data

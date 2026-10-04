@@ -470,7 +470,7 @@ push/PR to main ──> Smoke Job ──> (pass) ──> Full Job
 **Smoke job:**
 - Installs Node 22, runs `npm ci`, installs Chromium only
 - Runs tests matching `@smoke` against the `chromium` project
-- Uploads `playwright-report/` as an artifact
+- Uploads `results/` (HTML report, JUnit, JSON, traces) as an artifact
 
 **Full job:**
 - Depends on smoke passing

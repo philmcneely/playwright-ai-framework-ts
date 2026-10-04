@@ -61,7 +61,7 @@ const COMPLETELY_DIFFERENT_PAGE = `
   </html>
 `;
 
-test.describe("Visual Regression @visual", () => {
+test.describe("Visual Regression", { tag: ["@visual", "@regression"] }, () => {
   test.beforeEach(() => {
     // Clean up baselines for deterministic tests
     resetBaseline("baseline_creation");

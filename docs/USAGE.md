@@ -124,3 +124,115 @@ semantic locators, data-agnostic assertions, and page objects for anything reuse
 
 A real deployed example of Path 2 (dockerized nightly on a Linux host, systemd
 timer, heal→PR) lives in the `switchboard-e2e` repo's `deploy/` + its docs.
+
+---
+
+## Tags, reporters and retries
+
+### Tag convention
+
+Tag tests with Playwright's native `tag` option (on `test` or `test.describe`);
+a describe's tags are inherited by every test inside it.
+
+```ts
+test.describe("Cart", { tag: ["@cart", "@regression"] }, () => {
+  test("add item", { tag: ["@smoke", "@p0", "@positive"] }, async ({ app }) => { /* ... */ });
+});
+```
+
+Standard markers (use these exact names):
+
+| Kind | Tags |
+|---|---|
+| Suite | `@smoke`, `@regression` |
+| Priority | `@p0` (blocker) `@p1` `@p2` `@p3` (nice-to-have) |
+| Case type | `@positive`, `@negative`, `@boundary` |
+| Model-involved | `@llm` (tests that call an LLM / depend on model output) |
+| Feature | any area tag, e.g. `@login`, `@cart`, `@security`, `@visual` |
+
+Filter with `--grep` / `--grep-invert` (regex over title + tags):
+
+```bash
+npx playwright test --grep @smoke
+npx playwright test --grep @login
+npx playwright test --grep "@smoke|@p0"           # either tag
+npx playwright test --grep "(?=.*@login)(?=.*@negative)"   # both tags
+npx playwright test --grep-invert @llm            # everything except @llm
+npx playwright test --grep @smoke --grep-invert @security
+npx playwright test --grep @smoke --list          # preview the selection
+```
+
+### Reports and artifacts
+
+Every run writes to `results/` (git-ignored):
+
+| Output | Path |
+|---|---|
+| Console | `list` reporter |
+| HTML report | `results/html/` (`npx playwright show-report results/html`) |
+| JUnit | `results/junit.xml` |
+| JSON | `results/results.json` |
+| Allure results | `results/allure/` (raw data; see below) |
+| Traces / screenshots | `results/artifacts/` — trace `retain-on-failure`, screenshot `only-on-failure`, video off |
+
+The Jira, observability and stability reporters still run alongside these.
+
+### Retries and workers
+
+| Env var | Default | Effect |
+|---|---|---|
+| `PW_RETRIES` | `0` | Retries per failed test (`PW_RETRIES=2` in CI to surface flakes) |
+| `PW_WORKERS` | Playwright default | Parallel workers (`PW_WORKERS=1` to serialize) |
+
+```bash
+PW_RETRIES=2 PW_WORKERS=4 npx playwright test --grep @regression
+npx playwright test --retries=1 --workers=2     # CLI flags override the config
+```
+
+### Allure report
+
+`allure-playwright` writes raw results to `results/allure/` on every run. Rendering
+is optional and the Allure CLI is **not** needed in CI:
+
+```bash
+npx allure generate results/allure --clean -o results/allure-report   # needs the allure CLI (npm i -g allure / brew install allure)
+npx allure open results/allure-report
+```
+
+---
+
+## Data setup & teardown
+
+Reusable fixtures live in `fixtures/index.ts`, backed by `utils/data-seeding.ts`.
+All are env-driven and inert when unconfigured; there are no credentials in code.
+
+| Env var | Purpose |
+|---|---|
+| `SEED_API_URL` | Base URL for API seeding (`apiSeed` skips the test when unset) |
+| `SEED_API_TOKEN` | Optional bearer token |
+| `SEED_API_RESET_PATH` | Reset endpoint for `apiSeed.reset()` (default `/reset`) |
+| `SEED_API_RESET_ON_START` | `true` = reset the seed API once in `globalSetup` |
+| `DB_DSN` | `postgres://...` connection string (`npm i -D pg` to enable); unset = DB fixtures no-op |
+| `DB_SETUP_SQL` / `DB_RESET_SQL` | SQL files run by `dbSeed.setup()` / `dbSeed.reset()` |
+
+Fixtures:
+
+- **`cleanup`** (`CleanupRegistry`): `cleanup.add("label", async () => {...})` registers a
+  deletion; all run newest-first after the test (pass or fail). Failures are attached
+  as `cleanup-errors` and never mask the test result.
+- **`apiSeed`** (`ApiSeeder`): `create(path, data, id => deletePath)` POSTs and registers the
+  DELETE automatically; `reset()` calls the reset endpoint; `ctx` is the raw request context.
+- **`dbSeed`** (`DbSeeder`): `exec(sql)`, `setup()`, `reset()`; no-op without `DB_DSN`.
+- **`globalSetup` / `globalTeardown`** (`utils/global-setup.ts`, `utils/global-teardown.ts`,
+  wired in `playwright.config.ts`): DB setup once before the run, DB reset once after.
+
+```ts
+test("order total", async ({ apiSeed, dbSeed, app }) => {
+  await dbSeed.reset();
+  const user = await apiSeed.create<{ id: string }>("/users", { name: "u1" }, (u) => `/users/${u.id}`);
+  // ... drive the UI as `user` ...
+});   // user is deleted automatically
+```
+
+For per-file cleanup use the same registry in `test.afterAll`, or Playwright's
+`test.afterEach` for ad-hoc steps. Example: `tests/api/test-data-seeding.spec.ts`.

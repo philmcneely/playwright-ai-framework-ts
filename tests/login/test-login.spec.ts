@@ -1,8 +1,8 @@
 import { test, expect } from "../../fixtures/index.js";
 import { INVALID_USERS, EXPECTED_MESSAGES } from "../../data/test-data.js";
 
-test.describe("Login Tests", () => {
-  test("valid login @smoke", async ({ app }) => {
+test.describe("Login Tests", { tag: ["@login", "@regression"] }, () => {
+  test("valid login", { tag: ["@smoke", "@p0", "@positive"] }, async ({ app }) => {
     await app.loginPage.navigate();
     await app.loginPage.loginWithDemoUser();
     expect(await app.securePage.isOnSecurePage()).toBeTruthy();
@@ -10,7 +10,7 @@ test.describe("Login Tests", () => {
     expect(flash).toContain("You logged into a secure area!");
   });
 
-  test("invalid username @smoke", async ({ app }) => {
+  test("invalid username", { tag: ["@smoke", "@p1", "@negative"] }, async ({ app }) => {
     await app.loginPage.navigate();
     await app.loginPage.login(
       INVALID_USERS.invalid_username.username,
@@ -21,7 +21,7 @@ test.describe("Login Tests", () => {
     expect(flash).toContain(EXPECTED_MESSAGES.invalid_username);
   });
 
-  test("invalid password @smoke", async ({ app }) => {
+  test("invalid password", { tag: ["@smoke", "@p1", "@negative"] }, async ({ app }) => {
     await app.loginPage.navigate();
     await app.loginPage.login(
       INVALID_USERS.invalid_password.username,
@@ -32,13 +32,13 @@ test.describe("Login Tests", () => {
     expect(flash).toContain(EXPECTED_MESSAGES.invalid_password);
   });
 
-  test("empty credentials", async ({ app }) => {
+  test("empty credentials", { tag: ["@p2", "@boundary"] }, async ({ app }) => {
     await app.loginPage.navigate();
     await app.loginPage.login("", "");
     expect(await app.loginPage.isOnLoginPage()).toBeTruthy();
   });
 
-  test("logout functionality @smoke", async ({ app }) => {
+  test("logout functionality", { tag: ["@smoke", "@p1", "@positive"] }, async ({ app }) => {
     await app.loginPage.navigate();
     await app.loginPage.loginWithDemoUser();
     expect(await app.securePage.isOnSecurePage()).toBeTruthy();
@@ -48,7 +48,7 @@ test.describe("Login Tests", () => {
     expect(flash).toContain("You logged out of the secure area!");
   });
 
-  test("form field validation", async ({ app }) => {
+  test("form field validation", { tag: ["@p2", "@negative"] }, async ({ app }) => {
     await app.loginPage.navigate();
     await app.loginPage.enterUsername("test_user");
     const val = await app.loginPage.getUsernameValue();
