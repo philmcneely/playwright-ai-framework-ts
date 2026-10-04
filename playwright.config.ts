@@ -14,6 +14,8 @@ export default defineConfig({
   retries: Number(process.env.PW_RETRIES ?? 0),
   workers: process.env.PW_WORKERS ? Number(process.env.PW_WORKERS) : undefined,
   outputDir: "results/artifacts",
+  globalSetup: "./utils/global-setup.ts",
+  globalTeardown: "./utils/global-teardown.ts",
   reporter: [
     ["./utils/jira-reporter.ts"],
     ["./utils/observability-reporter.ts"],
@@ -22,6 +24,7 @@ export default defineConfig({
     ["html", { outputFolder: "results/html", open: "never" }],
     ["junit", { outputFile: "results/junit.xml" }],
     ["json", { outputFile: "results/results.json" }],
+    ["allure-playwright", { resultsDir: "results/allure" }],
   ],
   use: {
     baseURL: settings.BASE_URL,

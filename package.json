@@ -21,6 +21,7 @@
     "@types/node": "^22.0.0",
     "@types/pixelmatch": "^5.2.6",
     "@types/pngjs": "^6.0.5",
+    "allure-playwright": "^3.13.0",
     "dotenv": "^16.4.0",
     "eslint": "^9.0.0",
     "pixelmatch": "^6.0.0",

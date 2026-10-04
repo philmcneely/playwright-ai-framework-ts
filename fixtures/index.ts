@@ -4,12 +4,22 @@ import { NetworkMocker } from "../utils/network-mocking.js";
 import { VisualRegression } from "../utils/visual-regression.js";
 import { APICapture } from "../utils/api-capture.js";
 import { getUnstableTests } from "../utils/stability-index.js";
+import {
+  ApiSeeder,
+  CleanupRegistry,
+  DbSeeder,
+  newSeedContext,
+  seedApiConfigured,
+} from "../utils/data-seeding.js";
 
 type Fixtures = {
   app: App;
   apiMocker: NetworkMocker;
   visualRegression: VisualRegression;
   apiCapture: APICapture;
+  cleanup: CleanupRegistry;
+  apiSeed: ApiSeeder;
+  dbSeed: DbSeeder;
 };
 
 export const test = base.extend<Fixtures>({
@@ -27,6 +37,35 @@ export const test = base.extend<Fixtures>({
   visualRegression: async ({ page }, use) => {
     const vr = new VisualRegression(page);
     await use(vr);
+  },
+
+  // Tracks created entities; deletes them (newest first) after the test, even on failure.
+  // eslint-disable-next-line no-empty-pattern
+  cleanup: async ({}, use, testInfo) => {
+    const registry = new CleanupRegistry();
+    await use(registry);
+    const errors = await registry.runAll();
+    if (errors.length) {
+      await testInfo.attach("cleanup-errors", { body: errors.join("\n"), contentType: "text/plain" });
+    }
+  },
+
+  // API seeding: create/reset data before a test; created entities are removed on teardown.
+  // Skips the test when SEED_API_URL is not configured.
+  apiSeed: async ({ cleanup }, use, testInfo) => {
+    testInfo.skip(!seedApiConfigured(), "SEED_API_URL not set");
+    const ctx = await newSeedContext();
+    await use(new ApiSeeder(ctx, cleanup));
+    await cleanup.runAll();
+    await ctx.dispose();
+  },
+
+  // DB seeding/reset via DB_DSN; every call is a no-op when no DSN is set.
+  // eslint-disable-next-line no-empty-pattern
+  dbSeed: async ({}, use) => {
+    const db = new DbSeeder();
+    await use(db);
+    await db.close();
   },
 
   // QA-19: capture API traffic and, on failure, attach it to the report.
