@@ -291,12 +291,10 @@ npx playwright init-agents --loop=claude   # or: codex | opencode | vscode
 - **Healer** runs the suite, debugs failures in a real browser via MCP, updates **locators** (never the test's
   intent), and marks a test `test.fixme()` only when confident the test is right and the app is at fault.
 
-### Using any model (OpenRouter / local / fleet)
+### Using any model (OpenRouter / local / self-hosted)
 
 The model comes from the agent loop host. `--loop=claude` uses Claude; `--loop=opencode` (or `codex`) points
-at any **OpenAI-compatible** endpoint — set its base URL / model / key to OpenRouter, a local server, or a
-fleet proxy. Always route fleet models through their proxy so usage is attributed; never call a model endpoint
-directly.
+at any **OpenAI-compatible** endpoint — set its base URL / model / key to OpenRouter, or a local/self-hosted server.
 
 ### MCP server
 
@@ -315,10 +313,10 @@ a human (likely an app bug, not drift).
 The model is any **OpenAI-compatible** endpoint:
 
 ```bash
-# local / fleet proxy (no key); route fleet models through their proxy for attribution
+# local / self-hosted server (no key)
 BASE_URL=https://app.example.com \
-HEAL_BASE_URL=http://<proxy-host>:3025/v1 \
-HEAL_MODEL='ollama@localhost/qwen3.8-27b:latest' \
+HEAL_BASE_URL=http://localhost:3025/v1 \
+HEAL_MODEL='<model-name>' \
 npm run heal -- --grep "login" --open-pr
 
 # OpenRouter

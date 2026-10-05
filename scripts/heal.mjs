@@ -12,11 +12,9 @@
  * the decisions and the tests it left untouched.
  *
  * Model is provider-agnostic via an OpenAI-compatible endpoint:
- *   HEAL_BASE_URL   e.g. https://openrouter.ai/api/v1 | http://192.168.1.47:3025/v1
- *   HEAL_MODEL      e.g. ollama@localhost/qwen3.8-27b:latest
- *   HEAL_API_KEY    optional (omit for a local/fleet proxy)
- * Route fleet models through their proxy so usage is attributed; never call a
- * model endpoint directly.
+ *   HEAL_BASE_URL   e.g. https://openrouter.ai/api/v1 | http://localhost:3025/v1
+ *   HEAL_MODEL      e.g. qwen3:8b
+ *   HEAL_API_KEY    optional (omit for a local server or keyless gateway)
  *
  * Usage:
  *   BASE_URL=... HEAL_BASE_URL=... HEAL_MODEL=... node scripts/heal.mjs [--grep <name>] [--open-pr] [--max N]
