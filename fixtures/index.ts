@@ -73,9 +73,7 @@ export const test = base.extend<Fixtures>({
     async ({ page }, use) => {
       const cap = new APICapture();
       const onReq = (r: Request) => cap.onRequest(r);
-      const onRes = (r: Response) => {
-        void cap.onResponse(r);
-      };
+      const onRes = (r: Response) => cap.trackResponse(r);
       page.on("request", onReq);
       page.on("response", onRes);
 
@@ -83,6 +81,8 @@ export const test = base.extend<Fixtures>({
 
       page.off("request", onReq);
       page.off("response", onRes);
+      // Bodies are read asynchronously after headers arrive; wait so completed requests aren't omitted.
+      await cap.settled();
 
       const testInfo = test.info();
       if (testInfo.status !== testInfo.expectedStatus) {

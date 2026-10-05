@@ -33,7 +33,8 @@ export default defineConfig({
     video: "off",
     trace: "retain-on-failure",
     launchOptions: settings.getBrowserOptions(),
-    ...(zapProxy ? { proxy: zapProxy } : {}),
+    // ZAP re-signs HTTPS with its own CA, which the test browser does not trust.
+    ...(zapProxy ? { proxy: zapProxy, ignoreHTTPSErrors: true } : {}),
   },
   projects: [
     {
