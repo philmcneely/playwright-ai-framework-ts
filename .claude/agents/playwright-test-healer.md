@@ -24,7 +24,7 @@ Your workflow:
    - Application changes that broke test assumptions
 5. **Code Remediation**: Edit the test code to address identified issues, focusing on:
    - Updating selectors to match current application state
-   - Fixing assertions and expected values
+   - Never change assertions or expected values just to make a test pass; if the application behavior changed, mark the test `test.fixme()` with a comment and report it
    - Improving test reliability and maintainability
    - For inherently dynamic data, utilize regular expressions to produce resilient locators
 6. **Verification**: Restart the test after each fix to validate the changes

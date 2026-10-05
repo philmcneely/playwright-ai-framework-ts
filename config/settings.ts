@@ -10,10 +10,6 @@ export const settings = {
   HEADLESS: (process.env.HEADLESS || "true").toLowerCase() === "true",
   SLOW_MO: parseInt(process.env.SLOW_MO || "100", 10),
   TIMEOUT: parseInt(process.env.TIMEOUT || "30000", 10),
-  RETRY_COUNT: parseInt(process.env.RETRY_COUNT || "3", 10),
-  RETRY_DELAY: parseInt(process.env.RETRY_DELAY || "1000", 10),
-  SCREENSHOT_ON_FAILURE: (process.env.SCREENSHOT_ON_FAILURE || "true").toLowerCase() === "true",
-  VIDEO_ON_FAILURE: (process.env.VIDEO_ON_FAILURE || "true").toLowerCase() === "true",
   DEBUG_MSG: (process.env.DEBUG_MSG || "false").toLowerCase() === "true",
 
   getBrowserOptions() {

@@ -32,9 +32,11 @@ Then drive them conversationally:
 - **Generate** — "Use the playwright-test-generator agent to turn
   `specs/<plan>.md` into tests." → drives a real browser via MCP and writes spec files.
 - **Heal** — "Use the playwright-test-healer agent to fix the failing tests." →
-  runs the suite, reproduces each failure in the browser, updates **locators only**
-  (never the test's intent), re-runs until green; marks a test `test.fixme()` only
-  when it's confident the test is right and the app is at fault.
+  runs the suite, reproduces each failure in the browser, fixes stale
+  **locators and timing/synchronization only** (assertions and expected values are
+  never edited — see `.claude/agents/playwright-test-healer.md`), re-runs until
+  green; marks a test `test.fixme()` only when it's confident the test is right
+  and the app is at fault.
 
 **Use a different model to drive the agents:** re-run
 `npx playwright init-agents --loop=opencode` (or `codex`) and point that tool's
@@ -54,13 +56,21 @@ BASE_URL=<app-url> \
 HEAL_BASE_URL=<openai-compatible endpoint> \
 HEAL_MODEL=<model id> \
 [HEAL_API_KEY=<key>] \
-npm run heal -- [--grep <name>] [--max N] [--open-pr] [--tickets off|annotate|file]
+npm run heal -- [--grep <name>] [--max N] [--open-pr]
 ```
 
-What it does, per failing test: run it → reproduce in a real browser → read the
-**live accessibility snapshot** → ask `HEAL_MODEL` for a resilient semantic locator
-→ apply → **re-run to verify**. Locators only; a failure it can't make pass is
-reverted and flagged for a human. `--open-pr` assembles one PR with the decisions.
+What it does, per failing test: run the suite → take the **page snapshot Playwright
+captured at the moment of failure** (so stateful pages are grounded in the real
+state) → ask `HEAL_MODEL` for a resilient semantic locator → apply it to the one
+exact `page.locator()` / `page.getBy*()` call that failed → **re-run to verify**.
+A failure it can't make pass is reverted and flagged for a human.
+
+Guard rails: the model reply is untrusted and is accepted only as a single
+literal-argument locator call on the same receiver (anything else is rejected);
+ambiguous matches (identical locators in several places with no unique failure
+location) are left for a human; only locators written as direct
+`page.locator(...)`/`page.getBy*(...)` calls are healable, and dynamic locators
+are reported, not guessed.
 
 **Model examples (the "hook up any model" knob):**
 ```bash
@@ -77,12 +87,9 @@ HEAL_BASE_URL=http://localhost:11434/v1 HEAL_MODEL='qwen3:8b' npm run heal
 **Flags:**
 - `--grep <name>` — scope to matching tests.
 - `--max N` — cap how many failures it handles in a run.
-- `--open-pr` — commit the heals on a branch and open one PR (decisions + the
-  untouched/for-human list).
-- `--tickets off|annotate|file` — suspected app-bugs (genuine regressions it won't
-  "heal"): `annotate` (default) surfaces any matching open ticket in the PR;
-  `file` creates deduped tickets. `TICKET_TARGETS=clickup,jira` selects systems
-  (needs their creds in env — see the deploying repo's ops docs).
+- `--open-pr` — needs `git` and the `gh` CLI and a **clean worktree**. If at least
+  one heal succeeded, commits **only the healed files** on a new branch and opens
+  one PR listing the heals and the failures (within `--max`) left for a human.
 
 ---
 
@@ -101,8 +108,9 @@ HEAL_BASE_URL=http://localhost:11434/v1 HEAL_MODEL='qwen3:8b' npm run heal
 
 ### B. No agent, or a token-limited one (e.g. Copilot on a tight budget)
 You don't need an LLM to author a test — use Playwright's recorder, then refactor:
-1. **Record (zero tokens)** — `npx playwright codegen <url>`; click through the
-   flow and it writes a working test with real locators.
+1. **Record (zero tokens)** — `npx playwright codegen <url> --output tests/<name>.spec.ts`;
+   click through the flow and it writes a working test with real locators (without
+   `--output` the code only appears in the Inspector — copy it out).
 2. **Refactor to conventions** — move locators into a page object under `pages/`,
    prefer the resilient hierarchy `getByRole` → `getByLabel` → `getByPlaceholder`
    → `getByText` → `getByTestId` → CSS/XPath (last resort), and keep assertions
@@ -115,7 +123,7 @@ You don't need an LLM to author a test — use Playwright's recorder, then refac
    point at a **local/cheap model** (e.g. local Ollama), so keeping tests green
    never burns your Copilot/agent budget.
 
-Conventions either way: one feature per spec, `@smoke`/tag markers, resilient
+Conventions either way: one feature per spec, `{ tag: [...] }` markers (see "Tags, reporters and retries"), resilient
 semantic locators, data-agnostic assertions, and page objects for anything reused.
 
 ## Which path?
@@ -181,7 +189,7 @@ The Jira, observability and stability reporters still run alongside these.
 
 | Env var | Default | Effect |
 |---|---|---|
-| `PW_RETRIES` | `0` | Retries per failed test (`PW_RETRIES=2` in CI to surface flakes) |
+| `PW_RETRIES` | `0` | Retries per failed test (the CI workflow does not set it; export `PW_RETRIES=2` to surface flakes) |
 | `PW_WORKERS` | Playwright default | Parallel workers (`PW_WORKERS=1` to serialize) |
 
 ```bash

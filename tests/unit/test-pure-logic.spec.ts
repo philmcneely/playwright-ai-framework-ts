@@ -54,10 +54,15 @@ test.describe("categorizeError", () => {
     expect(categorizeError("Something bizarre happened")).toBe("other");
   });
 
+  test("'unexpectedly' is not an assertion", () => {
+    expect(categorizeError("Target closed unexpectedly")).toBe("browser-crash");
+    expect(categorizeError("Expected: 1, Received: 2")).toBe("assertion");
+    expect(categorizeError("expect(received).toBe(expected)")).toBe("assertion");
+  });
+
   test("earlier keyword categories win over later ones", () => {
-    // "unexpectedly" contains "expect", so this lands in assertion —
-    // documents the keyword-order behavior rather than an ideal taxonomy.
-    expect(categorizeError("Target closed unexpectedly")).toBe("assertion");
+    // "locator" outranks "expect" in the keyword order.
+    expect(categorizeError("expect(locator).toBeVisible() failed")).toBe("element-not-found");
   });
 });
 

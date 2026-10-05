@@ -26,6 +26,15 @@ export interface CapturedRequestDict {
   responseBody: string;
 }
 
+// Headers whose values are credentials: never persist them into report artifacts.
+const SENSITIVE_HEADER = /^(authorization|proxy-authorization|cookie|set-cookie)$|token|secret|api[-_]?key|password|auth/i;
+
+export function redactHeaders(headers: Record<string, string>): Record<string, string> {
+  return Object.fromEntries(
+    Object.entries(headers).map(([k, v]) => [k, SENSITIVE_HEADER.test(k) ? "[REDACTED]" : v]),
+  );
+}
+
 export class CapturedRequest {
   method: string;
   url: string;
@@ -72,7 +81,10 @@ export class CapturedRequest {
 
 export class APICapture {
   requests: CapturedRequest[] = [];
-  private pending = new Map<string, CapturedRequest>();
+  // Keyed by the Playwright Request object (not the URL) so overlapping calls
+  // to the same endpoint are tracked independently.
+  private pending = new Map<Request, CapturedRequest>();
+  private inflight = new Set<Promise<void>>();
 
   /** Only capture API calls, skip static assets. */
   shouldCapture(url: string): boolean {
@@ -88,14 +100,25 @@ export class APICapture {
   onRequest(request: Request): void {
     if (!this.shouldCapture(request.url())) return;
     this.pending.set(
-      request.url(),
+      request,
       new CapturedRequest({
         method: request.method(),
         url: request.url(),
-        requestHeaders: request.headers(),
+        requestHeaders: redactHeaders(request.headers()),
         timestamp: new Date().toISOString(),
       }),
     );
+  }
+
+  /** Track the async response handling so teardown can await it via settled(). */
+  trackResponse(response: Response): void {
+    const p = this.onResponse(response).finally(() => this.inflight.delete(p));
+    this.inflight.add(p);
+  }
+
+  /** Resolve once every response seen so far has finished (or been dropped). */
+  async settled(): Promise<void> {
+    while (this.inflight.size) await Promise.all([...this.inflight]);
   }
 
   async onResponse(response: Response): Promise<void> {
@@ -104,12 +127,12 @@ export class APICapture {
     // connection"), so no access is allowed to escape as an unhandled
     // rejection and disturb the test.
     try {
-      const url = response.url();
-      const captured = this.pending.get(url);
+      const request = response.request();
+      const captured = this.pending.get(request);
       if (!captured) return;
-      this.pending.delete(url);
+      this.pending.delete(request);
       captured.status = response.status();
-      captured.responseHeaders = response.headers();
+      captured.responseHeaders = redactHeaders(response.headers());
       try {
         const body = await response.body();
         captured.responseBody = body.toString("utf-8").slice(0, MAX_BODY);

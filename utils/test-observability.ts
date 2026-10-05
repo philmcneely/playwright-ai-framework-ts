@@ -55,7 +55,8 @@ export function categorizeError(message?: string): string | undefined {
     return "element-not-found";
   if (lower.includes("navigation") || lower.includes("net::"))
     return "navigation";
-  if (lower.includes("expect") || lower.includes("assertion"))
+  // Word-boundary match so "unexpectedly" is not mistaken for an assertion.
+  if (/\bexpect(?:ed)?\b/.test(lower) || lower.includes("assertion"))
     return "assertion";
   if (lower.includes("crash") || lower.includes("target closed"))
     return "browser-crash";
