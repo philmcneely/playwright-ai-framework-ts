@@ -6,7 +6,7 @@ pick-any-model call** (CI / nightly automation).
 
 | | Path 1 — Claude Code + MCP agents | Path 2 — the `heal` CLI |
 |---|---|---|
-| Model | the agent loop host (Claude; or opencode/codex → any model) | any OpenAI-compatible endpoint (OpenRouter / local / fleet Qwen) |
+| Model | the agent loop host (Claude; or opencode/codex → any model) | any OpenAI-compatible endpoint (OpenRouter / local / self-hosted) |
 | Needs | Claude Code (or another loop host) | just Node — no Claude Code |
 | Best for | authoring tests, judgment-heavy healing | CI / nightly / unattended healing |
 
@@ -64,8 +64,8 @@ reverted and flagged for a human. `--open-pr` assembles one PR with the decision
 
 **Model examples (the "hook up any model" knob):**
 ```bash
-# Fleet Qwen3.8-27B via its attributed proxy (route fleet models through the proxy)
-HEAL_BASE_URL=http://192.168.1.47:3025/v1 HEAL_MODEL='ollama@localhost/qwen3.8-27b:latest' npm run heal
+# Self-hosted OpenAI-compatible gateway/proxy
+HEAL_BASE_URL=http://localhost:3025/v1 HEAL_MODEL='<model-name>' npm run heal
 
 # OpenRouter
 HEAL_BASE_URL=https://openrouter.ai/api/v1 HEAL_MODEL='anthropic/claude-...' HEAL_API_KEY=sk-or-... npm run heal
