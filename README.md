@@ -86,9 +86,8 @@ ENV=test npx playwright test
 | `HEADLESS` | `true` | Run browser headless |
 | `SLOW_MO` | `100` | Slow down actions by N ms |
 | `TIMEOUT` | `30000` | Global test timeout in ms |
-| `RETRY_COUNT` | `3` | Number of retries on failure |
-| `SCREENSHOT_ON_FAILURE` | `true` | Capture screenshot on failure |
-| `VIDEO_ON_FAILURE` | `true` | Record video, retained on failure |
+| `PW_RETRIES` | `0` | Retries per failed test |
+| `PW_WORKERS` | Playwright default | Parallel workers |
 | `BROWSERSTACK_ENABLED` | `false` | Run on BrowserStack |
 | `BROWSERSTACK_USERNAME` | — | BrowserStack username |
 | `BROWSERSTACK_ACCESS_KEY` | — | BrowserStack access key |
@@ -200,7 +199,7 @@ Uses [pixelmatch](https://github.com/mapbox/pixelmatch) and [pngjs](https://gith
 ```typescript
 import { test, expect } from "../../fixtures/index.js";
 
-test("homepage visual check @visual", async ({ visualRegression, page }) => {
+test("homepage visual check", { tag: "@visual" }, async ({ visualRegression, page }) => {
   await page.goto("/");
   const result = await visualRegression.compare("homepage", {
     tolerance: 0.02,   // 2% pixel difference allowed
@@ -241,7 +240,7 @@ The `apiMocker` fixture is available automatically through `test.extend()`:
 ```typescript
 import { test, expect } from "../../fixtures/index.js";
 
-test("mock API response @api", async ({ apiMocker, page }) => {
+test("mock API response", { tag: "@api" }, async ({ apiMocker, page }) => {
   await apiMocker.mockGet("**/api/users", { users: [{ id: 1, name: "Test" }] });
   await page.goto("/some-page");
   // The mocked response will be returned for any matching GET request
@@ -386,7 +385,7 @@ JIRA_TOKEN=your_api_token
 Include the ticket ID anywhere in the test title path:
 
 ```typescript
-test("PROJ-123 login flow works correctly @smoke", async ({ page }) => {
+test("PROJ-123 login flow works correctly", { tag: "@smoke" }, async ({ page }) => {
   // ...
 });
 ```
@@ -544,7 +543,7 @@ This project is a full TypeScript port of the [Python Playwright AI Framework](h
 | `config/artifact_paths.py` | `config/artifact-paths.ts` |
 | `pages/` (Page Object Model) | `pages/` (Page Object Model) |
 | `data/test_data.py` | `data/test-data.ts` |
-| `pytest_runtest_makereport` hook | `AIHealingReporter` (custom Reporter) |
+| `pytest_runtest_makereport` hook | `scripts/heal.mjs` (out-of-band locator healing CLI) |
 | `utils/visual_regression.py` (OpenCV) | `utils/visual-regression.ts` (pixelmatch + pngjs) |
 | `utils/network_mocking.py` | `utils/network-mocking.ts` |
 | `@screenshot_on_failure` decorator | Built-in Playwright config (`screenshot: "only-on-failure"`) |
@@ -562,7 +561,7 @@ This project is a full TypeScript port of the [Python Playwright AI Framework](h
 ### Key Architectural Differences
 
 - **No conftest.py** — Fixtures are defined via `test.extend<Fixtures>()` in `fixtures/index.ts` and imported by test files.
-- **No pytest markers** — Tags are embedded in test titles (e.g., `@smoke`, `@visual`) and filtered with `--grep`.
+- **No pytest markers** — Tags use Playwright's native `{ tag: [...] }` option (e.g., `@smoke`, `@visual`) and are filtered with `--grep` (see `docs/USAGE.md`).
 - **Visual regression** — Python used OpenCV; TypeScript uses pixelmatch (pure JS, no native dependencies).
 - **Reporter vs hooks** — Python used pytest hooks; TypeScript uses Playwright's Reporter API, which provides structured callbacks for test lifecycle events.
 
@@ -586,16 +585,14 @@ Error: BASE_URL is not defined
 
 Ensure you have copied `.env.example` to `.env.dev` (or the file matching your `ENV` value) and that the variables are set.
 
-### Ollama not responding
+### Heal CLI cannot reach the model
 
 ```
-[AI Healing] Ollama service not running, attempting to start...
+TypeError: fetch failed
 ```
 
-- Verify Ollama is installed: `ollama --version`
-- Start it manually: `ollama serve`
-- Check the model is pulled: `ollama list`
-- Test connectivity: `curl http://localhost:11434/api/tags`
+- Check `HEAL_BASE_URL` / `HEAL_MODEL` (any OpenAI-compatible endpoint; `HEAL_API_KEY` if it needs one).
+- For a local Ollama: `curl http://localhost:11434/v1/models`, and make sure the model is pulled (`ollama list`).
 
 ### Visual regression baseline mismatch
 
