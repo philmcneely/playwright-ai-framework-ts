@@ -39,7 +39,9 @@
  * ===============================================================================
  */
 import { createHash } from "node:crypto";
-import fs, { closeSync, mkdirSync, openSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from "node:fs";
+import fs, {
+  closeSync, linkSync, mkdirSync, openSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync, writeSync,
+} from "node:fs";
 import path from "node:path";
 
 export const VERSION = 1;
@@ -269,20 +271,67 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const LOCK_WAIT_MS = 10_000;
 const LOCK_STALE_MS = 30_000;
 
-/** Run `fn` while holding an exclusive lock file in `directory` (created with O_EXCL; a lock older than 30 s is stale). */
+const alive = (pid) => {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (e) {
+    return e.code === "EPERM";
+  }
+};
+
+/** True when the lock file at `file` is stale: older than 30 s, or written by a process that is gone. */
+function isStale(file) {
+  try {
+    if (Date.now() - statSync(file).mtimeMs > LOCK_STALE_MS) return true;
+    const pid = Number.parseInt(readFileSync(file, "utf8"), 10);
+    return Number.isInteger(pid) && pid > 0 && !alive(pid);
+  } catch {
+    return false; // gone already, or not readable yet: the next create attempt decides
+  }
+}
+
+/** Take over a stale lock by renaming it away (atomic: of several waiters exactly one succeeds). If what was moved turns out to
+ * be live (someone replaced the lock in between), it is put back with a link that never overwrites. */
+function takeOver(lock) {
+  const moved = `${lock}.stale.${process.pid}.${Math.random().toString(36).slice(2)}`;
+  try {
+    renameSync(lock, moved);
+  } catch {
+    return; // another waiter got it first
+  }
+  if (!isStale(moved)) {
+    try {
+      linkSync(moved, lock);
+    } catch {
+      /* the lock was taken again meanwhile: the holder keeps its own */
+    }
+  }
+  try {
+    unlinkSync(moved);
+  } catch {
+    /* already gone */
+  }
+}
+
+/** Run `fn` while holding an exclusive lock file in `directory`. The file holds the holder's pid. */
 async function withLock(directory, fn) {
   const lock = path.join(directory, ".lock");
   const deadline = Date.now() + LOCK_WAIT_MS;
   for (;;) {
     try {
-      closeSync(openSync(lock, "wx"));
+      const fd = openSync(lock, "wx");
+      try {
+        writeSync(fd, String(process.pid));
+      } finally {
+        closeSync(fd);
+      }
       break;
     } catch (e) {
       if (e.code !== "EEXIST") throw e;
-      try {
-        if (Date.now() - statSync(lock).mtimeMs > LOCK_STALE_MS) unlinkSync(lock);
-      } catch {
-        /* the holder released it between the two calls */
+      if (isStale(lock)) {
+        takeOver(lock);
+        continue;
       }
       if (Date.now() > deadline) throw new Error("could not lock the fingerprint cache");
       await sleep(20 + Math.floor(Math.random() * 30));

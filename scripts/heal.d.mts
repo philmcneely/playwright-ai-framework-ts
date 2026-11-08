@@ -8,7 +8,7 @@ export interface SuiteRun {
 }
 export type SuiteRunner = (options?: { grep?: string | null; file?: string | null; env?: Record<string, string | undefined> }) => SuiteRun;
 export function runSuite(options?: { grep?: string | null; file?: string | null; env?: Record<string, string | undefined> }): SuiteRun;
-export function failuresOf(report: Json | null): Array<Failure & { file: string }>;
+export function failuresOf(report: Json | null, baseUrl?: string): Array<Failure & { file: string }>;
 export function verifyPassed(failure: Failure & { file: string }, runner?: SuiteRunner, root?: string): boolean;
 export function workingTreeDirty(): boolean;
 export function healFailures(

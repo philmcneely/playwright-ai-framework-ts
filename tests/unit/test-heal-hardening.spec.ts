@@ -8,7 +8,7 @@
  * @tags @unit @security
  */
 import { test, expect } from "@playwright/test";
-import { chmodSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { checkReplacement, hasControl, probingSelector, validateReplacement, buildLocator } from "../../scripts/heal-code.mjs";
 import {
@@ -16,7 +16,8 @@ import {
   settingsFromEnv, writeFiles,
 } from "../../scripts/heal-client.mjs";
 import { cleanInventory, redactTypedValues } from "../../scripts/heal-redact.mjs";
-import { buildPrBody, oneLine, printDecisions } from "../../scripts/heal.mjs";
+import { mergeInto } from "../../scripts/heal-fingerprints.mjs";
+import { buildPrBody, failuresOf, oneLine, printDecisions } from "../../scripts/heal.mjs";
 import {
   FROM, FakeLive, FakeService, PAGE_FILE, PAGE_SRC, TO, Verify, candidate, failureFor, healer, makeProject, read, reply, sha,
 } from "./heal-helpers.js";
@@ -245,5 +246,58 @@ test.describe("L9 regex", { tag: ["@unit", "@security", "@regression"] }, () => 
     expect(validateReplacement(`page.getByText(/${"a".repeat(250)}/)`, O)).toBeNull();
     expect(validateReplacement("page.getByText(/log ?in/i)", O)).not.toBeNull();
     expect(validateReplacement("page.getByRole('button', { name: /^Save( changes)?$/ })", O)).not.toBeNull();
+  });
+});
+
+test.describe("route from the report attachment", { tag: ["@unit", "@security", "@regression"] }, () => {
+  const report = (route: string) => ({
+    config: { rootDir: "/repo/tests" },
+    suites: [{ file: "t.spec.ts", specs: [{ title: "t", file: "t.spec.ts", tests: [{ status: "unexpected", results: [{
+      status: "failed", errors: [{ message: "e" }], attachments: [{ name: "heal-page-url", body: Buffer.from(route).toString("base64") }],
+    }] }] }] }],
+  });
+  for (const [route, want] of [["/app/index.html", "/app/index.html"], ["//evil.example/x", null], ["http://evil.example/", null], ["/a\\b", null]] as const) {
+    test(`failuresOf reads ${JSON.stringify(route)} as ${JSON.stringify(want)}`, () => {
+      expect(failuresOf(report(route) as never, "http://app.example")[0].route).toBe(want);
+    });
+  }
+});
+
+test.describe("fingerprint lock", { tag: ["@unit", "@security", "@regression"] }, () => {
+  const rec = { file: "pages/p.ts", text: "a", page: "/", language: "en", fingerprint: { tag: "a" } };
+  test("the lock file holds the holder's pid while it is held, and is gone after", async () => {
+    let seen = "";
+    const dir = path.join(root, ".heal");
+    const slow = mergeInto(root, { a: rec }, { HEAL_DIR: ".heal" });
+    for (let i = 0; i < 50 && !seen; i++) {
+      if (existsSync(path.join(dir, ".lock"))) seen = readFileSync(path.join(dir, ".lock"), "utf8");
+      await new Promise((r) => setTimeout(r, 1));
+    }
+    await slow;
+    if (seen) expect(seen).toBe(String(process.pid));
+    expect(existsSync(path.join(dir, ".lock"))).toBe(false);
+  });
+  test("a lock whose process is gone is taken over by rename, once, and no stale file is left", async () => {
+    const dir = path.join(root, ".heal");
+    mkdirSync(dir);
+    writeFileSync(path.join(dir, ".lock"), "999999"); // no such pid, and the file is fresh
+    const results = await Promise.all(Array.from({ length: 6 }, (_, i) => mergeInto(root, { [`k${i}`]: { ...rec, text: `t${i}` } }, { HEAL_DIR: ".heal" })));
+    expect(results.every(Boolean)).toBe(true);
+    expect(Object.keys(JSON.parse(readFileSync(path.join(dir, "fingerprints.json"), "utf8")).entries)).toHaveLength(6);
+    expect(readdirSync(dir).filter((f) => f.includes("stale") || f === ".lock")).toEqual([]);
+  });
+  test("an old lock is stale even when its pid is alive, a fresh live one is respected", async () => {
+    const dir = path.join(root, ".heal");
+    mkdirSync(dir);
+    const lock = path.join(dir, ".lock");
+    writeFileSync(lock, String(process.pid));
+    const old = new Date(Date.now() - 120_000);
+    utimesSync(lock, old, old);
+    expect(await mergeInto(root, { a: rec }, { HEAL_DIR: ".heal" })).toBe(true);
+    writeFileSync(lock, String(process.pid)); // live and fresh: released by us after 150 ms
+    setTimeout(() => rmSync(lock, { force: true }), 150);
+    const t0 = Date.now();
+    expect(await mergeInto(root, { b: rec }, { HEAL_DIR: ".heal" })).toBe(true);
+    expect(Date.now() - t0).toBeGreaterThanOrEqual(100);
   });
 });

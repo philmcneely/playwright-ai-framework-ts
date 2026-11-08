@@ -47,7 +47,7 @@ import { mkdirSync, mkdtempSync, readFileSync, renameSync, writeFileSync } from 
 import { tmpdir } from "node:os";
 import path, { join, relative, resolve } from "node:path";
 import { receiverText } from "./heal-code.mjs";
-import { HealServiceError, Healer, ServiceClient, runTotal, settingsFromEnv } from "./heal-client.mjs";
+import { HealServiceError, Healer, ServiceClient, runTotal, safeRoute, settingsFromEnv } from "./heal-client.mjs";
 import { validReplacement } from "./heal-validate.mjs";
 
 export { validReplacement };
@@ -106,7 +106,7 @@ function* specsOf(report) {
 }
 
 /** Flatten the JSON report into the failing tests: error text, stack text, source location and the page path at the failure. */
-export function failuresOf(report) {
+export function failuresOf(report, baseUrl = settingsFromEnv().baseUrl) {
   const fails = [];
   for (const { title, file, test: t } of specsOf(report)) {
     const results = t.results ?? [];
@@ -120,7 +120,8 @@ export function failuresOf(report) {
       error: errors.map((e) => e.message ?? "").join("\n").replace(ANSI, ""),
       stack: errors.map((e) => e.stack ?? "").join("\n").replace(ANSI, ""),
       location: errors.find((e) => e.location)?.location ?? null,
-      route: attachmentText(last, HEAL_PAGE_ATTACHMENT)?.trim() || null,
+      // an attachment is a file a test run wrote: only a same-origin path is accepted, checked here where it is read
+      route: safeRoute(attachmentText(last, HEAL_PAGE_ATTACHMENT)?.trim(), baseUrl),
     });
   }
   return fails;

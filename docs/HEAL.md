@@ -75,7 +75,7 @@ settle the heal with **no model call**. Without one every heal starts at the tex
 - While recording, Playwright names `utils/heal-recorder.ts` as the location of a failing action in that run's report. The heal
   run itself never installs the recorder.
 
-The fixture also remembers the `Content-Language` header of page loads and, when a test fails, attaches the **path** of the page it
+The fixture also, when a test fails, attaches the **path** of the page it
 was on (`heal-page-url`, no query or fragment) so the heal can reopen the failing route.
 
 ## Language branches
@@ -84,17 +84,16 @@ A locator built from page copy only works in the language the copy is written in
 language than the passing run, the service keeps both and writes a call to the helper in `utils/heal-locale.ts`:
 
 ```ts
-await byLanguage(this.page, { en: this.page.getByLabel('Username'), fr: this.page.getByLabel("Nom d'utilisateur") })
+byLanguage(this.page, { en: this.page.getByLabel('Username'), fr: this.page.getByLabel("Nom d'utilisateur") })
 ```
 
-The helper returns the entry for the page language (`<html lang>`, then the browser locale, then `Content-Language`) and the
-first entry (the original copy) for any other language. Copy is never translated. The result is a lazy locator: `await
-byLanguage(...)` gives the `Locator`, and the result also works in front of an action (`await byLanguage(...).click()`), which
-is how it lands when it replaces the locator in `await page.getByLabel('x').click()`.
+The helper returns **one real Playwright `Locator`**, built at once with no page read, so it works in any position: in front of an
+action, inside `expect(...)`, in a getter or a field. Each branch is scoped under `html:lang(<key>)` and the first branch (the
+original copy) under every language not listed, joined with `.or()`, so a language nobody healed for behaves as it did before the
+heal and only one scope matches a page. `:lang()` follows `<html lang>`; `fr-CA` is `fr`. Copy is never translated.
 
 The client adds `import { byLanguage } from "../utils/heal-locale.js"` (a real import, found in the syntax tree) to a file that
-receives branch code. It writes `await` only where the code is async (an async function or a module's top level): in a getter or
-a class field it refuses that candidate and the service moves on.
+receives branch code. If the service writes `await` in front of it, the client allows that only where the code is async.
 
 ## Vision
 

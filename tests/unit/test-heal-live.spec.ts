@@ -14,7 +14,6 @@ import type { AddressInfo } from "node:net";
 import { PNG } from "pngjs";
 import { LivePage, buildRequest, settingsFromEnv } from "../../scripts/heal-client.mjs";
 import { vendoredProbe } from "../../scripts/heal-probe.mjs";
-import { byLanguage } from "../../utils/heal-locale.js";
 import { makeProject } from "./heal-helpers.js";
 
 const PAGE = `<!doctype html><html lang="fr"><head><title>Compte</title><style>
@@ -194,33 +193,6 @@ test.describe("live page", { tag: ["@unit", "@regression"] }, () => {
       expect(JSON.stringify(snap)).not.toContain("TYPED-SECRET");
       expect(snap.aria).toContain("public");
       expect(await live.page.evaluate(() => navigator.serviceWorker?.getRegistrations().then((r) => r.length) ?? 0)).toBe(0);
-    } finally {
-      await live.close();
-    }
-  });
-});
-
-test.describe("byLanguage in a real page", { tag: ["@unit", "@regression"] }, () => {
-  test("the lazy locator picks the branch of the page's <html lang> and runs the action on it", async () => {
-    const live = await open(); // the local page is lang="fr"
-    try {
-      const page = live.page;
-      const branches = {
-        en: page.getByRole("button", { name: "Save changes" }),
-        fr: page.getByRole("button", { name: "Enregistrer" }),
-      };
-      expect(await byLanguage(page, branches).textContent()).toBe("Enregistrer");
-      expect(await byLanguage(page, branches).count()).toBe(1);
-      // the shape the service writes in front of an action: await await byLanguage(...).click()
-      let clicked = 0;
-      await page.exposeFunction("clicked", () => void clicked++);
-      await page.evaluate(() => document.getElementById("save")?.addEventListener("click", () => (window as never as { clicked(): void }).clicked()));
-      await await byLanguage(page, branches).click();
-      expect(clicked).toBe(1);
-      // another language than any branch: the first entry, the original copy
-      await page.evaluate(() => document.documentElement.setAttribute("lang", "de"));
-      expect(await byLanguage(page, { fr: branches.fr, en: branches.en }).count()).toBe(1);
-      expect(await byLanguage(page, { en: branches.en, fr: branches.fr }).count()).toBe(0);
     } finally {
       await live.close();
     }
