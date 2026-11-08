@@ -1,0 +1,90 @@
+{
+  "client": {
+    "framework": "example-framework",
+    "language": "python",
+    "version": "1.0.0"
+  },
+  "test": {
+    "id": "tests/test_account.py::save",
+    "title": "saves the account"
+  },
+  "failure": {
+    "error": "playwright._impl._errors.TimeoutError: Locator.fill: Timeout 30000ms exceeded.\nCall log:\n  - waiting for locator('#username')\n",
+    "stack": []
+  },
+  "source": {
+    "roots": [
+      "pages"
+    ],
+    "files": [
+      {
+        "path": "pages/account_page.py",
+        "content": "class AccountPage:\n    def __init__(self, page):\n        self.page = page\n\n    def save(self, name):\n        self.page.locator('#username').fill(name)\n\n    def save_again(self, name):\n        self.page.locator('#username').fill(name)\n"
+      }
+    ]
+  },
+  "page": {
+    "url": "http://app.example/account",
+    "language": {
+      "html_lang": "en",
+      "browser_locale": "en-US"
+    },
+    "inventory": [
+      {
+        "tag": "input",
+        "type": "text",
+        "role": "textbox",
+        "name": "Username",
+        "label": "Username",
+        "box": {
+          "x": 10,
+          "y": 10,
+          "w": 200,
+          "h": 30
+        },
+        "attrs": {
+          "id": "user-name",
+          "data-testid": "login-user",
+          "name": "user"
+        }
+      },
+      {
+        "tag": "input",
+        "type": "password",
+        "label": "Password",
+        "box": {
+          "x": 10,
+          "y": 90,
+          "w": 200,
+          "h": 30
+        },
+        "attrs": {
+          "id": "pwd",
+          "name": "pwd"
+        }
+      },
+      {
+        "tag": "button",
+        "name": "Log in",
+        "text": "Log in",
+        "box": {
+          "x": 10,
+          "y": 130,
+          "w": 200,
+          "h": 30
+        },
+        "attrs": {
+          "id": "go"
+        }
+      }
+    ]
+  },
+  "options": {
+    "max_rounds": 3
+  },
+  "test_id_attribute": "data-testid",
+  "run": {
+    "id": "contract-ambiguous_source_needs_human",
+    "repo": "example-app"
+  }
+}

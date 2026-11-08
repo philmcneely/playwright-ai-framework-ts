@@ -1,0 +1,21 @@
+{
+  "description": "The test id was removed from the element and only an id is left. Nothing at or above the test id tier is unique, so the heal moves down one tier, and says so (tier_movement down, below_floor true).",
+  "model": [
+    {
+      "reply": "{\"ref\": \"e0\", \"why\": \"scripted pick\"}",
+      "usage": [
+        100,
+        8
+      ]
+    }
+  ],
+  "results": [
+    {
+      "count": 1,
+      "hit": {
+        "ref": "e0"
+      },
+      "test_outcome": "passed"
+    }
+  ]
+}

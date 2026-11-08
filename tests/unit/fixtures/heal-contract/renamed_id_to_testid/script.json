@@ -1,0 +1,21 @@
+{
+  "description": "The id the test used is gone; the same input still carries a test id. A text pick finds the input and the heal moves UP a tier, from the id to the test id.",
+  "model": [
+    {
+      "reply": "{\"ref\": \"e0\", \"why\": \"scripted pick\"}",
+      "usage": [
+        100,
+        8
+      ]
+    }
+  ],
+  "results": [
+    {
+      "count": 1,
+      "hit": {
+        "ref": "e0"
+      },
+      "test_outcome": "passed"
+    }
+  ]
+}

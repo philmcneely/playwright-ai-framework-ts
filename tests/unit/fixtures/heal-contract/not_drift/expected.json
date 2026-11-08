@@ -1,0 +1,32 @@
+{
+  "python": [
+    {
+      "status": "not_drift",
+      "round": 0,
+      "reason": "no_locator_in_error",
+      "settled_at": null,
+      "ended_at": 1,
+      "cache_hit": false,
+      "usage": {
+        "calls": 0,
+        "input_tokens": 0,
+        "output_tokens": 0
+      }
+    }
+  ],
+  "typescript": [
+    {
+      "status": "not_drift",
+      "round": 0,
+      "reason": "no_locator_in_error",
+      "settled_at": null,
+      "ended_at": 1,
+      "cache_hit": false,
+      "usage": {
+        "calls": 0,
+        "input_tokens": 0,
+        "output_tokens": 0
+      }
+    }
+  ]
+}

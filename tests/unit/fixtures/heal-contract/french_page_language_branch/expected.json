@@ -1,0 +1,278 @@
+{
+  "python": [
+    {
+      "status": "try",
+      "round": 1,
+      "reason": null,
+      "settled_at": 3,
+      "ended_at": null,
+      "cache_hit": false,
+      "usage": {
+        "calls": 1,
+        "input_tokens": 100,
+        "output_tokens": 8
+      },
+      "candidate": {
+        "target_ref": "e1",
+        "strategy": "label",
+        "tier": "label",
+        "tier_movement": "down",
+        "below_floor": true,
+        "locator": {
+          "kind": "by_language",
+          "branches": {
+            "en": {
+              "chain": [
+                {
+                  "m": "get_by_role",
+                  "a": [
+                    "checkbox"
+                  ],
+                  "o": {
+                    "name": "Subscribe to the newsletter"
+                  },
+                  "p": false
+                }
+              ]
+            },
+            "fr": {
+              "chain": [
+                {
+                  "m": "get_by_label",
+                  "a": [
+                    "S'abonner à la lettre d'information"
+                  ],
+                  "o": {
+                    "exact": true
+                  },
+                  "p": false
+                }
+              ]
+            }
+          }
+        },
+        "code": "by_language(self.page, {\"en\": self.page.get_by_role(\"checkbox\", name=\"Subscribe to the newsletter\"), \"fr\": self.page.get_by_label(\"S'abonner à la lettre d'information\", exact=True)})",
+        "branches": {
+          "en": "self.page.get_by_role(\"checkbox\", name=\"Subscribe to the newsletter\")",
+          "fr": "self.page.get_by_label(\"S'abonner à la lettre d'information\", exact=True)"
+        },
+        "expect": {
+          "count": 1,
+          "ref": "e1"
+        },
+        "patch": {
+          "file": "pages/account_page.py",
+          "from": "self.page.get_by_role(\"checkbox\", name=\"Subscribe to the newsletter\")",
+          "to": "by_language(self.page, {\"en\": self.page.get_by_role(\"checkbox\", name=\"Subscribe to the newsletter\"), \"fr\": self.page.get_by_label(\"S'abonner à la lettre d'information\", exact=True)})"
+        },
+        "also_patches": []
+      }
+    },
+    {
+      "status": "healed",
+      "round": 1,
+      "reason": null,
+      "settled_at": 3,
+      "ended_at": 7,
+      "cache_hit": false,
+      "usage": {
+        "calls": 1,
+        "input_tokens": 100,
+        "output_tokens": 8
+      },
+      "candidate": {
+        "target_ref": "e1",
+        "strategy": "label",
+        "tier": "label",
+        "tier_movement": "down",
+        "below_floor": true,
+        "locator": {
+          "kind": "by_language",
+          "branches": {
+            "en": {
+              "chain": [
+                {
+                  "m": "get_by_role",
+                  "a": [
+                    "checkbox"
+                  ],
+                  "o": {
+                    "name": "Subscribe to the newsletter"
+                  },
+                  "p": false
+                }
+              ]
+            },
+            "fr": {
+              "chain": [
+                {
+                  "m": "get_by_label",
+                  "a": [
+                    "S'abonner à la lettre d'information"
+                  ],
+                  "o": {
+                    "exact": true
+                  },
+                  "p": false
+                }
+              ]
+            }
+          }
+        },
+        "code": "by_language(self.page, {\"en\": self.page.get_by_role(\"checkbox\", name=\"Subscribe to the newsletter\"), \"fr\": self.page.get_by_label(\"S'abonner à la lettre d'information\", exact=True)})",
+        "branches": {
+          "en": "self.page.get_by_role(\"checkbox\", name=\"Subscribe to the newsletter\")",
+          "fr": "self.page.get_by_label(\"S'abonner à la lettre d'information\", exact=True)"
+        },
+        "expect": {
+          "count": 1,
+          "ref": "e1"
+        },
+        "patch": {
+          "file": "pages/account_page.py",
+          "from": "self.page.get_by_role(\"checkbox\", name=\"Subscribe to the newsletter\")",
+          "to": "by_language(self.page, {\"en\": self.page.get_by_role(\"checkbox\", name=\"Subscribe to the newsletter\"), \"fr\": self.page.get_by_label(\"S'abonner à la lettre d'information\", exact=True)})"
+        },
+        "also_patches": []
+      }
+    }
+  ],
+  "typescript": [
+    {
+      "status": "try",
+      "round": 1,
+      "reason": null,
+      "settled_at": 3,
+      "ended_at": null,
+      "cache_hit": false,
+      "usage": {
+        "calls": 1,
+        "input_tokens": 100,
+        "output_tokens": 8
+      },
+      "candidate": {
+        "target_ref": "e1",
+        "strategy": "label",
+        "tier": "label",
+        "tier_movement": "down",
+        "below_floor": true,
+        "locator": {
+          "kind": "by_language",
+          "branches": {
+            "en": {
+              "chain": [
+                {
+                  "m": "getByRole",
+                  "a": [
+                    "checkbox"
+                  ],
+                  "o": {
+                    "name": "Subscribe to the newsletter"
+                  },
+                  "p": false
+                }
+              ]
+            },
+            "fr": {
+              "chain": [
+                {
+                  "m": "getByLabel",
+                  "a": [
+                    "S'abonner à la lettre d'information"
+                  ],
+                  "o": {
+                    "exact": true
+                  },
+                  "p": false
+                }
+              ]
+            }
+          }
+        },
+        "code": "await byLanguage(this.page, { en: this.page.getByRole('checkbox', { name: 'Subscribe to the newsletter' }), fr: this.page.getByLabel('S\\'abonner à la lettre d\\'information', { exact: true }) })",
+        "branches": {
+          "en": "this.page.getByRole('checkbox', { name: 'Subscribe to the newsletter' })",
+          "fr": "this.page.getByLabel('S\\'abonner à la lettre d\\'information', { exact: true })"
+        },
+        "expect": {
+          "count": 1,
+          "ref": "e1"
+        },
+        "patch": {
+          "file": "pages/account-page.ts",
+          "from": "this.page.getByRole('checkbox', { name: 'Subscribe to the newsletter' })",
+          "to": "await byLanguage(this.page, { en: this.page.getByRole('checkbox', { name: 'Subscribe to the newsletter' }), fr: this.page.getByLabel('S\\'abonner à la lettre d\\'information', { exact: true }) })"
+        },
+        "also_patches": []
+      }
+    },
+    {
+      "status": "healed",
+      "round": 1,
+      "reason": null,
+      "settled_at": 3,
+      "ended_at": 7,
+      "cache_hit": false,
+      "usage": {
+        "calls": 1,
+        "input_tokens": 100,
+        "output_tokens": 8
+      },
+      "candidate": {
+        "target_ref": "e1",
+        "strategy": "label",
+        "tier": "label",
+        "tier_movement": "down",
+        "below_floor": true,
+        "locator": {
+          "kind": "by_language",
+          "branches": {
+            "en": {
+              "chain": [
+                {
+                  "m": "getByRole",
+                  "a": [
+                    "checkbox"
+                  ],
+                  "o": {
+                    "name": "Subscribe to the newsletter"
+                  },
+                  "p": false
+                }
+              ]
+            },
+            "fr": {
+              "chain": [
+                {
+                  "m": "getByLabel",
+                  "a": [
+                    "S'abonner à la lettre d'information"
+                  ],
+                  "o": {
+                    "exact": true
+                  },
+                  "p": false
+                }
+              ]
+            }
+          }
+        },
+        "code": "await byLanguage(this.page, { en: this.page.getByRole('checkbox', { name: 'Subscribe to the newsletter' }), fr: this.page.getByLabel('S\\'abonner à la lettre d\\'information', { exact: true }) })",
+        "branches": {
+          "en": "this.page.getByRole('checkbox', { name: 'Subscribe to the newsletter' })",
+          "fr": "this.page.getByLabel('S\\'abonner à la lettre d\\'information', { exact: true })"
+        },
+        "expect": {
+          "count": 1,
+          "ref": "e1"
+        },
+        "patch": {
+          "file": "pages/account-page.ts",
+          "from": "this.page.getByRole('checkbox', { name: 'Subscribe to the newsletter' })",
+          "to": "await byLanguage(this.page, { en: this.page.getByRole('checkbox', { name: 'Subscribe to the newsletter' }), fr: this.page.getByLabel('S\\'abonner à la lettre d\\'information', { exact: true }) })"
+        },
+        "also_patches": []
+      }
+    }
+  ]
+}

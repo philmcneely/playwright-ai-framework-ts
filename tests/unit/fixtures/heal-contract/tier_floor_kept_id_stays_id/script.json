@@ -1,0 +1,21 @@
+{
+  "description": "The id changed and the element still has a name, a label and a placeholder. The new id is at the broken locator's tier; the heal does not drop to a lower one.",
+  "model": [
+    {
+      "reply": "{\"ref\": \"e0\", \"why\": \"scripted pick\"}",
+      "usage": [
+        100,
+        8
+      ]
+    }
+  ],
+  "results": [
+    {
+      "count": 1,
+      "hit": {
+        "ref": "e0"
+      },
+      "test_outcome": "passed"
+    }
+  ]
+}

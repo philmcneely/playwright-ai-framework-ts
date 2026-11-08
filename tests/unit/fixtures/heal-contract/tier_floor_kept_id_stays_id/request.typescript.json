@@ -1,0 +1,81 @@
+{
+  "client": {
+    "framework": "example-framework",
+    "language": "typescript",
+    "version": "1.0.0"
+  },
+  "test": {
+    "id": "tests/test_account.spec.ts::save",
+    "title": "saves the account"
+  },
+  "failure": {
+    "error": "Error: locator.fill: Test timeout of 30000ms exceeded.\nCall log:\n  - waiting for locator('#user')\n",
+    "stack": [
+      {
+        "file": "pages/account-page.ts",
+        "line": 5
+      }
+    ]
+  },
+  "source": {
+    "roots": [
+      "pages"
+    ],
+    "files": [
+      {
+        "path": "pages/account-page.ts",
+        "content": "export class AccountPage {\n  constructor(private page: Page) {}\n\n  async save(name: string) {\n    await this.page.locator('#user').fill(name);\n  }\n}\n"
+      }
+    ]
+  },
+  "page": {
+    "url": "http://app.example/account",
+    "language": {
+      "html_lang": "en",
+      "browser_locale": "en-US"
+    },
+    "inventory": [
+      {
+        "tag": "input",
+        "type": "text",
+        "role": "textbox",
+        "name": "Username",
+        "label": "Username",
+        "placeholder": "Your username",
+        "box": {
+          "x": 10,
+          "y": 10,
+          "w": 200,
+          "h": 30
+        },
+        "attrs": {
+          "id": "login-user-field",
+          "name": "user"
+        }
+      },
+      {
+        "tag": "input",
+        "type": "password",
+        "label": "Password",
+        "box": {
+          "x": 10,
+          "y": 90,
+          "w": 200,
+          "h": 30
+        },
+        "attrs": {
+          "id": "pwd",
+          "name": "pwd"
+        }
+      }
+    ]
+  },
+  "options": {
+    "max_rounds": 3
+  },
+  "test_id_attribute": "data-testid",
+  "run": {
+    "id": "contract-tier_floor_kept_id_stays_id",
+    "repo": "example-app"
+  }
+}

@@ -1,0 +1,32 @@
+{
+  "python": [
+    {
+      "status": "needs_human",
+      "round": 0,
+      "reason": "target_missing",
+      "settled_at": null,
+      "ended_at": 3,
+      "cache_hit": false,
+      "usage": {
+        "calls": 0,
+        "input_tokens": 0,
+        "output_tokens": 0
+      }
+    }
+  ],
+  "typescript": [
+    {
+      "status": "needs_human",
+      "round": 0,
+      "reason": "target_missing",
+      "settled_at": null,
+      "ended_at": 3,
+      "cache_hit": false,
+      "usage": {
+        "calls": 0,
+        "input_tokens": 0,
+        "output_tokens": 0
+      }
+    }
+  ]
+}

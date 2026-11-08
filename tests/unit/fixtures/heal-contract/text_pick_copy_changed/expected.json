@@ -1,0 +1,186 @@
+{
+  "python": [
+    {
+      "status": "try",
+      "round": 1,
+      "reason": null,
+      "settled_at": 3,
+      "ended_at": null,
+      "cache_hit": false,
+      "usage": {
+        "calls": 1,
+        "input_tokens": 100,
+        "output_tokens": 8
+      },
+      "candidate": {
+        "target_ref": "e2",
+        "strategy": "id",
+        "tier": "id",
+        "tier_movement": "up",
+        "below_floor": false,
+        "locator": {
+          "kind": "id",
+          "chain": [
+            {
+              "m": "locator",
+              "a": [
+                "#go"
+              ],
+              "o": {},
+              "p": false
+            }
+          ]
+        },
+        "code": "self.page.locator(\"#go\")",
+        "branches": null,
+        "expect": {
+          "count": 1,
+          "ref": "e2"
+        },
+        "patch": {
+          "file": "pages/account_page.py",
+          "from": "self.page.get_by_role(\"button\", name=\"Sign in\")",
+          "to": "self.page.locator(\"#go\")"
+        },
+        "also_patches": []
+      }
+    },
+    {
+      "status": "healed",
+      "round": 1,
+      "reason": null,
+      "settled_at": 3,
+      "ended_at": 7,
+      "cache_hit": false,
+      "usage": {
+        "calls": 1,
+        "input_tokens": 100,
+        "output_tokens": 8
+      },
+      "candidate": {
+        "target_ref": "e2",
+        "strategy": "id",
+        "tier": "id",
+        "tier_movement": "up",
+        "below_floor": false,
+        "locator": {
+          "kind": "id",
+          "chain": [
+            {
+              "m": "locator",
+              "a": [
+                "#go"
+              ],
+              "o": {},
+              "p": false
+            }
+          ]
+        },
+        "code": "self.page.locator(\"#go\")",
+        "branches": null,
+        "expect": {
+          "count": 1,
+          "ref": "e2"
+        },
+        "patch": {
+          "file": "pages/account_page.py",
+          "from": "self.page.get_by_role(\"button\", name=\"Sign in\")",
+          "to": "self.page.locator(\"#go\")"
+        },
+        "also_patches": []
+      }
+    }
+  ],
+  "typescript": [
+    {
+      "status": "try",
+      "round": 1,
+      "reason": null,
+      "settled_at": 3,
+      "ended_at": null,
+      "cache_hit": false,
+      "usage": {
+        "calls": 1,
+        "input_tokens": 100,
+        "output_tokens": 8
+      },
+      "candidate": {
+        "target_ref": "e2",
+        "strategy": "id",
+        "tier": "id",
+        "tier_movement": "up",
+        "below_floor": false,
+        "locator": {
+          "kind": "id",
+          "chain": [
+            {
+              "m": "locator",
+              "a": [
+                "#go"
+              ],
+              "o": {},
+              "p": false
+            }
+          ]
+        },
+        "code": "this.page.locator('#go')",
+        "branches": null,
+        "expect": {
+          "count": 1,
+          "ref": "e2"
+        },
+        "patch": {
+          "file": "pages/account-page.ts",
+          "from": "this.page.getByRole('button', { name: 'Sign in' })",
+          "to": "this.page.locator('#go')"
+        },
+        "also_patches": []
+      }
+    },
+    {
+      "status": "healed",
+      "round": 1,
+      "reason": null,
+      "settled_at": 3,
+      "ended_at": 7,
+      "cache_hit": false,
+      "usage": {
+        "calls": 1,
+        "input_tokens": 100,
+        "output_tokens": 8
+      },
+      "candidate": {
+        "target_ref": "e2",
+        "strategy": "id",
+        "tier": "id",
+        "tier_movement": "up",
+        "below_floor": false,
+        "locator": {
+          "kind": "id",
+          "chain": [
+            {
+              "m": "locator",
+              "a": [
+                "#go"
+              ],
+              "o": {},
+              "p": false
+            }
+          ]
+        },
+        "code": "this.page.locator('#go')",
+        "branches": null,
+        "expect": {
+          "count": 1,
+          "ref": "e2"
+        },
+        "patch": {
+          "file": "pages/account-page.ts",
+          "from": "this.page.getByRole('button', { name: 'Sign in' })",
+          "to": "this.page.locator('#go')"
+        },
+        "also_patches": []
+      }
+    }
+  ]
+}

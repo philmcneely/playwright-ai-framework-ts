@@ -1,0 +1,26 @@
+{
+  "description": "The client reports that the first locator matched two elements. The service answers with the next ranked locator for the same element, with no model call.",
+  "model": [
+    {
+      "reply": "{\"ref\": \"e0\", \"why\": \"scripted pick\"}",
+      "usage": [
+        100,
+        8
+      ]
+    }
+  ],
+  "results": [
+    {
+      "count": 2,
+      "hit": null,
+      "test_outcome": null
+    },
+    {
+      "count": 1,
+      "hit": {
+        "ref": "e0"
+      },
+      "test_outcome": "passed"
+    }
+  ]
+}

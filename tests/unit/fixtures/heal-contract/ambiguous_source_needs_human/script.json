@@ -1,0 +1,13 @@
+{
+  "description": "The locator in the error is written the same way in two places and the stack names neither: the service never edits a call it is not sure is the broken one.",
+  "model": [
+    {
+      "reply": "{\"ref\": \"e0\", \"why\": \"scripted pick\"}",
+      "usage": [
+        100,
+        8
+      ]
+    }
+  ],
+  "results": []
+}

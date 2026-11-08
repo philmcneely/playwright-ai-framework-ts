@@ -1,0 +1,96 @@
+{
+  "client": {
+    "framework": "example-framework",
+    "language": "python",
+    "version": "1.0.0"
+  },
+  "test": {
+    "id": "tests/test_account.py::save",
+    "title": "saves the account"
+  },
+  "failure": {
+    "error": "playwright._impl._errors.TimeoutError: Locator.check: Timeout 30000ms exceeded.\nCall log:\n  - waiting for get_by_role(\"checkbox\", name=\"Subscribe to the newsletter\")\n",
+    "stack": [
+      {
+        "file": "pages/account_page.py",
+        "line": 6
+      }
+    ]
+  },
+  "source": {
+    "roots": [
+      "pages"
+    ],
+    "files": [
+      {
+        "path": "pages/account_page.py",
+        "content": "class AccountPage:\n    def __init__(self, page):\n        self.page = page\n\n    def save(self, name):\n        self.page.get_by_role(\"checkbox\", name=\"Subscribe to the newsletter\").check()\n"
+      }
+    ]
+  },
+  "page": {
+    "url": "http://app.example/account",
+    "language": {
+      "html_lang": "fr",
+      "browser_locale": "en-US"
+    },
+    "inventory": [
+      {
+        "tag": "input",
+        "type": "text",
+        "role": "textbox",
+        "name": "Username",
+        "label": "Username",
+        "box": {
+          "x": 10,
+          "y": 10,
+          "w": 200,
+          "h": 30
+        },
+        "attrs": {
+          "id": "user-name",
+          "data-testid": "login-user",
+          "name": "user"
+        }
+      },
+      {
+        "tag": "input",
+        "type": "checkbox",
+        "role": "checkbox",
+        "name": "S'abonner à la lettre d'information",
+        "label": "S'abonner à la lettre d'information",
+        "top_at_center": true,
+        "box": {
+          "x": 10,
+          "y": 170,
+          "w": 200,
+          "h": 30
+        }
+      }
+    ]
+  },
+  "options": {
+    "max_rounds": 3
+  },
+  "test_id_attribute": "data-testid",
+  "run": {
+    "id": "contract-french_page_language_branch",
+    "repo": "example-app"
+  },
+  "last_pass": {
+    "fingerprint": {
+      "tag": "input",
+      "type": "checkbox",
+      "role": "checkbox",
+      "name": "Subscribe to the newsletter",
+      "label": "Subscribe to the newsletter",
+      "box": {
+        "x": 10,
+        "y": 170,
+        "w": 200,
+        "h": 30
+      }
+    },
+    "language": "en"
+  }
+}

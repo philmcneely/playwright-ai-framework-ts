@@ -1,0 +1,81 @@
+{
+  "client": {
+    "framework": "example-framework",
+    "language": "python",
+    "version": "1.0.0"
+  },
+  "test": {
+    "id": "tests/test_account.py::save",
+    "title": "saves the account"
+  },
+  "failure": {
+    "error": "playwright._impl._errors.TimeoutError: Locator.fill: Timeout 30000ms exceeded.\nCall log:\n  - waiting for locator('#user')\n",
+    "stack": [
+      {
+        "file": "pages/account_page.py",
+        "line": 6
+      }
+    ]
+  },
+  "source": {
+    "roots": [
+      "pages"
+    ],
+    "files": [
+      {
+        "path": "pages/account_page.py",
+        "content": "class AccountPage:\n    def __init__(self, page):\n        self.page = page\n\n    def save(self, name):\n        self.page.locator('#user').fill(name)\n"
+      }
+    ]
+  },
+  "page": {
+    "url": "http://app.example/account",
+    "language": {
+      "html_lang": "en",
+      "browser_locale": "en-US"
+    },
+    "inventory": [
+      {
+        "tag": "input",
+        "type": "text",
+        "role": "textbox",
+        "name": "Username",
+        "label": "Username",
+        "placeholder": "Your username",
+        "box": {
+          "x": 10,
+          "y": 10,
+          "w": 200,
+          "h": 30
+        },
+        "attrs": {
+          "id": "login-user-field",
+          "name": "user"
+        }
+      },
+      {
+        "tag": "input",
+        "type": "password",
+        "label": "Password",
+        "box": {
+          "x": 10,
+          "y": 90,
+          "w": 200,
+          "h": 30
+        },
+        "attrs": {
+          "id": "pwd",
+          "name": "pwd"
+        }
+      }
+    ]
+  },
+  "options": {
+    "max_rounds": 3
+  },
+  "test_id_attribute": "data-testid",
+  "run": {
+    "id": "contract-tier_floor_kept_id_stays_id",
+    "repo": "example-app"
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "description": "The passing run recorded the input's attributes. The service finds the same element without a model: zero calls, zero tokens, settled at step 2.",
+  "model": [],
+  "results": [
+    {
+      "count": 1,
+      "hit": {
+        "ref": "e0"
+      },
+      "test_outcome": "passed"
+    }
+  ]
+}

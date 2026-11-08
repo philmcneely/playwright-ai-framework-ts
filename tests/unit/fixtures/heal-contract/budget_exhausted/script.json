@@ -1,0 +1,31 @@
+{
+  "description": "The run's token budget is spent by the first pick; when the client rules that pick out, the second pick is not made and the heal ends needs_human with budget_exhausted.",
+  "model": [
+    {
+      "reply": "{\"ref\": \"e0\", \"why\": \"scripted pick\"}",
+      "usage": [
+        100,
+        8
+      ]
+    },
+    {
+      "reply": "{\"ref\": \"e1\", \"why\": \"scripted pick\"}",
+      "usage": [
+        100,
+        8
+      ]
+    }
+  ],
+  "results": [
+    {
+      "count": 1,
+      "hit": {
+        "ref": "e1"
+      },
+      "test_outcome": "passed"
+    }
+  ],
+  "settings": {
+    "run_token_budget": 100
+  }
+}

@@ -1,0 +1,186 @@
+{
+  "python": [
+    {
+      "status": "try",
+      "round": 1,
+      "reason": null,
+      "settled_at": 3,
+      "ended_at": null,
+      "cache_hit": false,
+      "usage": {
+        "calls": 1,
+        "input_tokens": 100,
+        "output_tokens": 8
+      },
+      "candidate": {
+        "target_ref": "e0",
+        "strategy": "id",
+        "tier": "id",
+        "tier_movement": "down",
+        "below_floor": true,
+        "locator": {
+          "kind": "id",
+          "chain": [
+            {
+              "m": "locator",
+              "a": [
+                "#save"
+              ],
+              "o": {},
+              "p": false
+            }
+          ]
+        },
+        "code": "self.page.locator(\"#save\")",
+        "branches": null,
+        "expect": {
+          "count": 1,
+          "ref": "e0"
+        },
+        "patch": {
+          "file": "pages/account_page.py",
+          "from": "self.page.get_by_test_id(\"save-settings\")",
+          "to": "self.page.locator(\"#save\")"
+        },
+        "also_patches": []
+      }
+    },
+    {
+      "status": "healed",
+      "round": 1,
+      "reason": null,
+      "settled_at": 3,
+      "ended_at": 7,
+      "cache_hit": false,
+      "usage": {
+        "calls": 1,
+        "input_tokens": 100,
+        "output_tokens": 8
+      },
+      "candidate": {
+        "target_ref": "e0",
+        "strategy": "id",
+        "tier": "id",
+        "tier_movement": "down",
+        "below_floor": true,
+        "locator": {
+          "kind": "id",
+          "chain": [
+            {
+              "m": "locator",
+              "a": [
+                "#save"
+              ],
+              "o": {},
+              "p": false
+            }
+          ]
+        },
+        "code": "self.page.locator(\"#save\")",
+        "branches": null,
+        "expect": {
+          "count": 1,
+          "ref": "e0"
+        },
+        "patch": {
+          "file": "pages/account_page.py",
+          "from": "self.page.get_by_test_id(\"save-settings\")",
+          "to": "self.page.locator(\"#save\")"
+        },
+        "also_patches": []
+      }
+    }
+  ],
+  "typescript": [
+    {
+      "status": "try",
+      "round": 1,
+      "reason": null,
+      "settled_at": 3,
+      "ended_at": null,
+      "cache_hit": false,
+      "usage": {
+        "calls": 1,
+        "input_tokens": 100,
+        "output_tokens": 8
+      },
+      "candidate": {
+        "target_ref": "e0",
+        "strategy": "id",
+        "tier": "id",
+        "tier_movement": "down",
+        "below_floor": true,
+        "locator": {
+          "kind": "id",
+          "chain": [
+            {
+              "m": "locator",
+              "a": [
+                "#save"
+              ],
+              "o": {},
+              "p": false
+            }
+          ]
+        },
+        "code": "this.page.locator('#save')",
+        "branches": null,
+        "expect": {
+          "count": 1,
+          "ref": "e0"
+        },
+        "patch": {
+          "file": "pages/account-page.ts",
+          "from": "this.page.getByTestId('save-settings')",
+          "to": "this.page.locator('#save')"
+        },
+        "also_patches": []
+      }
+    },
+    {
+      "status": "healed",
+      "round": 1,
+      "reason": null,
+      "settled_at": 3,
+      "ended_at": 7,
+      "cache_hit": false,
+      "usage": {
+        "calls": 1,
+        "input_tokens": 100,
+        "output_tokens": 8
+      },
+      "candidate": {
+        "target_ref": "e0",
+        "strategy": "id",
+        "tier": "id",
+        "tier_movement": "down",
+        "below_floor": true,
+        "locator": {
+          "kind": "id",
+          "chain": [
+            {
+              "m": "locator",
+              "a": [
+                "#save"
+              ],
+              "o": {},
+              "p": false
+            }
+          ]
+        },
+        "code": "this.page.locator('#save')",
+        "branches": null,
+        "expect": {
+          "count": 1,
+          "ref": "e0"
+        },
+        "patch": {
+          "file": "pages/account-page.ts",
+          "from": "this.page.getByTestId('save-settings')",
+          "to": "this.page.locator('#save')"
+        },
+        "also_patches": []
+      }
+    }
+  ]
+}
