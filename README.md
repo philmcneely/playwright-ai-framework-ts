@@ -302,30 +302,29 @@ at any **OpenAI-compatible** endpoint — set its base URL / model / key to Open
 
 ## Locator Healing CLI (`npm run heal`)
 
-`scripts/heal.mjs` is the out-of-band healer — the engine for the overnight
-heal→PR flow. It runs failing tests, reproduces each failure in a real browser to
-read the **live accessibility snapshot**, asks a configurable model for a resilient
-semantic locator, applies it, and **re-runs to verify**. It heals **locators only**,
-never assertions or intent; a failure it can't make pass is reverted and flagged for
-a human (likely an app bug, not drift).
+`scripts/heal.mjs` is the out-of-band healer, the engine for the overnight heal→PR flow. It runs failing tests, sends each
+failure's evidence (the stack's source files, the live page's element inventory and accessibility snapshot, the language
+signals, the last green run's fingerprint) to a **heal service**, checks the locator the service writes **in the live page**
+(exactly one match, the expected element), applies it under strict safety checks, and **re-runs the exact test** to verify. It
+heals **locators only**, never assertions or intent; a failure it can't make pass is reverted and flagged for a human (likely an
+app bug, not drift).
 
-The model is any **OpenAI-compatible** endpoint:
+**The framework holds no model configuration**: no model URL, model name, prompt or reply parsing. The service owns the model
+calls; the framework only needs to know where the service is:
 
 ```bash
-# local / self-hosted server (no key)
 BASE_URL=https://app.example.com \
-HEAL_BASE_URL=http://localhost:3025/v1 \
-HEAL_MODEL='<model-name>' \
+HEAL_SERVICE_URL=http://localhost:8765 \
+[HEAL_SERVICE_TOKEN=...] [HEAL_VISION=off|auto|on] \
 npm run heal -- --grep "login" --open-pr
-
-# OpenRouter
-HEAL_BASE_URL=https://openrouter.ai/api/v1 HEAL_MODEL='...' HEAL_API_KEY=sk-... npm run heal
 ```
 
-Flags: `--grep <name>` (scope to tests), `--max N` (cap failures handled), `--open-pr`
-(assemble one PR with the per-failure decisions and the untouched/for-human list).
-Run it nightly after the suite (e.g. a scheduled job on a host with LAN access to the
-model and the app) to get a morning PR.
+Flags: `--grep <name>` (scope to tests), `--max N` (cap failures handled), `--open-pr` (assemble one PR with the per-failure
+decisions and the untouched/for-human list). Every decision is printed with its token usage and a run total, and
+`heal-summary.json` is written into `test_artifacts/`. Set `HEAL_FINGERPRINTS=on` for the test runs so a green run records what
+each locator hit; with that the service can settle many heals with no model call. Run it nightly after the suite to get a morning PR.
+
+Full guide (configuration, fingerprints, language branches, vision, safety rules, limits): **[docs/HEAL.md](docs/HEAL.md)**.
 
 ## BrowserStack Integration
 
@@ -543,7 +542,7 @@ This project is a full TypeScript port of the [Python Playwright AI Framework](h
 | `config/artifact_paths.py` | `config/artifact-paths.ts` |
 | `pages/` (Page Object Model) | `pages/` (Page Object Model) |
 | `data/test_data.py` | `data/test-data.ts` |
-| `pytest_runtest_makereport` hook | `scripts/heal.mjs` (out-of-band locator healing CLI) |
+| `scripts/heal.py` (heal service client) | `scripts/heal.mjs` (heal service client, out-of-band locator healing CLI) |
 | `utils/visual_regression.py` (OpenCV) | `utils/visual-regression.ts` (pixelmatch + pngjs) |
 | `utils/network_mocking.py` | `utils/network-mocking.ts` |
 | `@screenshot_on_failure` decorator | Built-in Playwright config (`screenshot: "only-on-failure"`) |
@@ -585,14 +584,15 @@ Error: BASE_URL is not defined
 
 Ensure you have copied `.env.example` to `.env.dev` (or the file matching your `ENV` value) and that the variables are set.
 
-### Heal CLI cannot reach the model
+### Heal CLI cannot reach the service
 
 ```
-TypeError: fetch failed
+[heal] ... needs_human [service_error] ... the heal service could not be reached
 ```
 
-- Check `HEAL_BASE_URL` / `HEAL_MODEL` (any OpenAI-compatible endpoint; `HEAL_API_KEY` if it needs one).
-- For a local Ollama: `curl http://localhost:11434/v1/models`, and make sure the model is pulled (`ollama list`).
+- Check `HEAL_SERVICE_URL` (for example `curl http://localhost:8765/healthz`) and `HEAL_SERVICE_TOKEN` if the service needs one.
+- A token is never sent over `http://` to a host other than localhost: use `https://`, or set `HEAL_ALLOW_INSECURE=1` on a trusted network.
+- The model is configured in the service, not here; see the service's own documentation.
 
 ### Visual regression baseline mismatch
 
