@@ -186,6 +186,18 @@ test.describe("loop", { tag: ["@unit", "@regression"] }, () => {
     expect(d.usage).toEqual({ calls: 1, input_tokens: 100, output_tokens: 9, images: 0 });
   });
 
+  test("the re-run is told where the patch is in the patched file, and the decision names the element it was checked against", async () => {
+    const br = { en: "this.page.getByLabel('Username')", fr: "this.page.getByLabel('Nom')" };
+    const to = `byLanguage(this.page, { en: ${br.en}, fr: ${br.fr} })`;
+    const cand = candidate(root, { to, branches: br });
+    const svc = new FakeService([reply("try", cand), reply("healed", cand)]);
+    let told: unknown = null;
+    const d = await healer(root, svc, async (_f: unknown, patched: unknown) => ((told = patched), true)).heal(failureFor(root));
+    // the file gains an import line before the patch: the original line 8 is line 9 in the patched file
+    expect(told).toEqual({ file: PAGE_FILE, line: 9 });
+    expect(d.ref).toBe("e0");
+  });
+
   test("a wrong count edits nothing and tries the next candidate", async () => {
     const live = new FakeLive({ [TO]: [2, null] });
     const svc = new FakeService([reply("try", candidate(root)), reply("needs_human", null, { reason: "no_candidate_left", why: "none left" })]);

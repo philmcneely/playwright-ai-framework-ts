@@ -396,6 +396,7 @@ export function planPatches(candidate, sent, roots, root) {
     byFile.set(rel, [...(byFile.get(rel) ?? []), p]);
   });
   const planned = [];
+  const mainLines = new Map();
   for (const [rel, group] of byFile) {
     let isLink = true;
     try {
@@ -439,12 +440,20 @@ export function planPatches(candidate, sent, roots, root) {
     }
     let next = text;
     for (const { start, end, p } of [...spans].reverse()) next = next.slice(0, start) + p.to + next.slice(end);
+    const replaced = next;
     if (next.includes(HELPER + "(") && !importsHelper(next, rel)) next = withHelperImport(next, rel);
+    const mainSpan = spans.find((x) => x.p === candidate.patch);
+    if (mainSpan) {
+      // where the main replacement starts in the PATCHED file: the replacements before it, then the import line that may be added
+      const before = spans.filter((x) => x.start < mainSpan.start).reduce((n, x) => n + str(x.p.to).length - (x.end - x.start), 0);
+      const at = mainSpan.start + before + (next.length - replaced.length);
+      mainLines.set(rel, next.slice(0, at).split("\n").length);
+    }
     if (expressionSpans(next, rel) === null) throw new PatchRefused(`the patched ${rel} would not parse`, true);
     planned.push({ rel, original: raw, newText: next });
   }
   // what this heal actually writes: the decision is built from it, never from what the service says afterwards
-  planned.main = { file: str(candidate.patch?.file), from: str(candidate.patch?.from), to: str(candidate.patch?.to) };
+  planned.main = { file: str(candidate.patch?.file), from: str(candidate.patch?.from), to: str(candidate.patch?.to), line: mainLines.get(str(candidate.patch?.file)) ?? null };
   return planned;
 }
 
@@ -903,11 +912,12 @@ export class Healer {
       }
       return [{ ...resp, status: "needs_human", reason: "patch_refused", why: `the client refused the patch: ${e.reason}` }, []];
     }
+    planned.ref = ref; // the inventory entry the live check saw
     let next;
     let passed;
     try {
       writeFiles(this.root, planned, this.writeFile); // inside the try: a partial multi-file write is reverted
-      passed = Boolean(await this.verify(failure));
+      passed = Boolean(await this.verify(failure, { file: planned.main.file, line: planned.main.line })); // where the patch is, in the patched file
       if (!passed) revertFiles(this.root, planned, this.writeFile);
       next = await this.report(healId, { count: 1, hit: { ref }, test_outcome: passed ? "passed" : "failed" });
     } catch (e) {
@@ -971,6 +981,7 @@ export class Healer {
       });
       out.from = kept.main.from;
       out.source = `heal service (settled at step ${out.settled_at})`;
+      out.ref = text(kept.ref, 20); // the inventory entry the written locator was checked against
     } else if (resp.status === "not_drift") {
       out.outcome = "not_drift";
     } else {

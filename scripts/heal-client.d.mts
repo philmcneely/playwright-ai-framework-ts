@@ -135,7 +135,7 @@ export class Healer {
   constructor(
     service: Pick<ServiceClient, "probeJs" | "heal" | "result">,
     settings: HealSettings,
-    verify: (failure: Failure) => Promise<boolean> | boolean,
+    verify: (failure: Failure, patched: { file: string; line: number | null }) => Promise<boolean> | boolean,
     options?: {
       root?: string;
       liveFactory?: ((route: string, probe: string) => Promise<any> | any) | null;
