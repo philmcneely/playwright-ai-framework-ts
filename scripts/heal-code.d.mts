@@ -1,3 +1,4 @@
+/** Types for scripts/heal-code.mjs (the syntax-tree locator checks). */
 export const HELPER: string;
 export const HELPER_MODULE: string;
 export const ALLOWED_LOCATOR_METHODS: Set<string>;

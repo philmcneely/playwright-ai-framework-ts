@@ -1,4 +1,5 @@
 /* eslint-disable @typescript-eslint/no-explicit-any -- the service replies and Playwright pages are dynamic JSON/objects */
+/** Types for scripts/heal-client.mjs (the heal service client). */
 
 export type Env = Record<string, string | undefined>;
 export type Json = Record<string, any>;

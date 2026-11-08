@@ -1,3 +1,4 @@
+/** Types for scripts/heal-probe.mjs (the vendored page probe). */
 export const PROBE_SHA256: string;
 export function sha256(data: string | Uint8Array): string;
 export function probeCandidates(): string[];

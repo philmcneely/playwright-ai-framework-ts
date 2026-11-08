@@ -1,3 +1,4 @@
+/** Types for scripts/heal.mjs (the heal CLI). */
 import type { Decision, Failure, Json } from "./heal-client.mjs";
 
 export function validReplacement(proposed: string, receiver: string): boolean;

@@ -1,3 +1,4 @@
+/** Types for scripts/heal-fingerprints.mjs (the fingerprint file format and store). */
 export const VERSION: number;
 export const DEFAULT_ROOTS: string[];
 export const ACTIONS: string[];
