@@ -34,9 +34,10 @@ class FakeLocator {
   async count() {
     return this.count_;
   }
-  async evaluate(script: string) {
-    this.calls.push(script);
-    return script.includes("frameElement") ? this.frame : this.data;
+  async evaluate(script: unknown) {
+    const text = String(script); // Playwright sends a function as its source
+    this.calls.push(text);
+    return text.includes("frameElement") ? this.frame : this.data;
   }
 }
 const asLocator = (l: FakeLocator) => l as unknown as Locator;
