@@ -22,6 +22,7 @@
  *     - importsHelper / withHelperImport: a real `import { byLanguage }` statement is found in the tree (a comment or a
  *       string that says so does not count) and added after the last import when it is missing
  *     - toUtf16Index: the service counts spans in code points; JavaScript strings count UTF-16 units
+ *     - awaitAllowedAt: whether an `await` may be written where a patch goes (async function or module top level)
  *
  * Environment Variables:
  *     None.
@@ -366,6 +367,29 @@ export function expressionSpans(text, file = "file.ts") {
   };
   visit(sf);
   return spans;
+}
+
+/**
+ * True when an `await` may be written in place of the expression at [start, end) of `text`: inside an async function, or at
+ * the top level of a module. A getter, a class field, a non-async function or a script are not (the service writes
+ * `await byLanguage(...)`, which would not compile there).
+ */
+export function awaitAllowedAt(text, file, start, end) {
+  const sf = parseFile(text, file);
+  let target = null;
+  const find = (node) => {
+    if (target === null && ts.isExpression(node) && node.getStart(sf) === start && node.getEnd() === end) target = node;
+    if (target === null) ts.forEachChild(node, find);
+  };
+  find(sf);
+  if (target === null) return false;
+  for (let n = target.parent; n; n = n.parent) {
+    if (ts.isFunctionLike(n)) return Boolean(n.modifiers?.some((m) => m.kind === K.AsyncKeyword));
+    if (ts.isPropertyDeclaration(n) || ts.isClassStaticBlockDeclaration(n)) return false;
+    if (ts.isSourceFile(n)) return n.statements.some((st) => ts.isImportDeclaration(st) || ts.isExportDeclaration(st) || ts.isExportAssignment(st) ||
+      st.modifiers?.some((m) => m.kind === K.ExportKeyword));
+  }
+  return false;
 }
 
 // ---- the helper import ---------------------------------------------------------------------------------------------------
