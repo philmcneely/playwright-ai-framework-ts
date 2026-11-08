@@ -189,7 +189,7 @@
             }
           }
         },
-        "code": "await byLanguage(this.page, { en: this.page.getByRole('checkbox', { name: 'Subscribe to the newsletter' }), fr: this.page.getByLabel('S\\'abonner à la lettre d\\'information', { exact: true }) })",
+        "code": "byLanguage(this.page, { en: this.page.getByRole('checkbox', { name: 'Subscribe to the newsletter' }), fr: this.page.getByLabel('S\\'abonner à la lettre d\\'information', { exact: true }) })",
         "branches": {
           "en": "this.page.getByRole('checkbox', { name: 'Subscribe to the newsletter' })",
           "fr": "this.page.getByLabel('S\\'abonner à la lettre d\\'information', { exact: true })"
@@ -201,7 +201,7 @@
         "patch": {
           "file": "pages/account-page.ts",
           "from": "this.page.getByRole('checkbox', { name: 'Subscribe to the newsletter' })",
-          "to": "await byLanguage(this.page, { en: this.page.getByRole('checkbox', { name: 'Subscribe to the newsletter' }), fr: this.page.getByLabel('S\\'abonner à la lettre d\\'information', { exact: true }) })"
+          "to": "byLanguage(this.page, { en: this.page.getByRole('checkbox', { name: 'Subscribe to the newsletter' }), fr: this.page.getByLabel('S\\'abonner à la lettre d\\'information', { exact: true }) })"
         },
         "also_patches": []
       }
@@ -257,7 +257,7 @@
             }
           }
         },
-        "code": "await byLanguage(this.page, { en: this.page.getByRole('checkbox', { name: 'Subscribe to the newsletter' }), fr: this.page.getByLabel('S\\'abonner à la lettre d\\'information', { exact: true }) })",
+        "code": "byLanguage(this.page, { en: this.page.getByRole('checkbox', { name: 'Subscribe to the newsletter' }), fr: this.page.getByLabel('S\\'abonner à la lettre d\\'information', { exact: true }) })",
         "branches": {
           "en": "this.page.getByRole('checkbox', { name: 'Subscribe to the newsletter' })",
           "fr": "this.page.getByLabel('S\\'abonner à la lettre d\\'information', { exact: true })"
@@ -269,7 +269,7 @@
         "patch": {
           "file": "pages/account-page.ts",
           "from": "this.page.getByRole('checkbox', { name: 'Subscribe to the newsletter' })",
-          "to": "await byLanguage(this.page, { en: this.page.getByRole('checkbox', { name: 'Subscribe to the newsletter' }), fr: this.page.getByLabel('S\\'abonner à la lettre d\\'information', { exact: true }) })"
+          "to": "byLanguage(this.page, { en: this.page.getByRole('checkbox', { name: 'Subscribe to the newsletter' }), fr: this.page.getByLabel('S\\'abonner à la lettre d\\'information', { exact: true }) })"
         },
         "also_patches": []
       }
