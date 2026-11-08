@@ -13,6 +13,7 @@ export interface HealSettings {
   roots: string[];
   storageState: string | null;
   baseUrl: string;
+  allowOrigins: string[];
 }
 
 export interface Failure {
@@ -66,6 +67,9 @@ export class ServiceClient {
   result(healId: string, report: Json): Promise<Json>;
 }
 export function cleanError(text: string, root: string): string;
+export const MAX_ROUNDS: number;
+export function redactErrorValues(text: string): string;
+export function safeRoute(route: unknown, baseUrl: string): string | null;
 export function stackFromFailure(failure: Failure, roots: string[], root: string): Array<{ file: string; line: number }>;
 export function testId(failure: Failure, root: string): string;
 export function readTextFile(root: string, rel: string): { text: string; raw: Buffer } | null;
@@ -98,8 +102,9 @@ export function writeFiles(root: string, planned: PlannedFile[], write?: (file: 
 export function revertFiles(root: string, planned: PlannedFile[], write?: (file: string, data: Buffer) => void): void;
 export function matchRef(inventory: Json[], facts: Json): string | null;
 export class OriginGuard {
-  constructor(baseUrl: string);
+  constructor(baseUrl: string, options?: { always?: boolean; allow?: string[] });
   origin: string;
+  foreign(url: string): boolean;
   probing: boolean;
   handle(route: any, request?: any): Promise<void>;
   active<T>(fn: () => Promise<T>): Promise<T>;

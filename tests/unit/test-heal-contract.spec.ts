@@ -17,7 +17,7 @@ import { test, expect } from "@playwright/test";
 import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { Healer, buildLocator, pageLanguage, settingsFromEnv, type Json } from "../../scripts/heal-client.mjs";
+import { Healer, buildLocator, pageLanguage, redactErrorValues, settingsFromEnv, type Json } from "../../scripts/heal-client.mjs";
 import { callKey, lineOf, mergeInto, pagePath } from "../../scripts/heal-fingerprints.mjs";
 import { vendoredProbe } from "../../scripts/heal-probe.mjs";
 import { sha } from "./heal-helpers.js";
@@ -200,7 +200,7 @@ test.describe("contract fixtures", { tag: ["@unit", "@contract", "@regression"] 
 
         // 1. the evidence the client sent
         expectSchemaKeys(sent);
-        expect(sent.failure.error).toBe(req.failure.error);
+        expect(sent.failure.error).toBe(redactErrorValues(req.failure.error)); // Received / Expected values never leave
         expect(sent.failure.stack).toEqual(req.failure.stack);
         expect(sent.test.title).toBe(req.test.title);
         expect(sent.test_id_attribute).toBe(req.test_id_attribute);

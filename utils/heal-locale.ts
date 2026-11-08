@@ -110,6 +110,9 @@ function lazy(resolve: () => Promise<Locator>): LazyLocator {
     get(_target, prop) {
       if (prop === "then") return (ok?: (v: Locator) => unknown, fail?: (e: unknown) => unknown) => once().then(ok, fail);
       if (typeof prop === "symbol") return undefined;
+      // what every object has (toString, constructor, __proto__, hasOwnProperty, ...) stays what it is, so the lazy locator
+      // can be printed, compared and inspected without a hidden page read
+      if (prop in Object.prototype) return Reflect.get(_target, prop);
       const call = (...args: unknown[]) =>
         once().then((locator) => (locator as unknown as Record<string, (...a: unknown[]) => unknown>)[prop](...args));
       if (LOCATOR_METHODS.has(prop)) {

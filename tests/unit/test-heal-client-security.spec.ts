@@ -480,12 +480,10 @@ test.describe("low findings", { tag: ["@unit", "@security", "@regression"] }, ()
     const other = [{ test: "t_@mention", why: "[click](http://evil.example) ![i](x)\r\n- injected" }];
     const body = buildPrBody(healed as never, other as never);
     expect(body).not.toContain("[x](http");
-    expect(body).not.toContain("<img");
-    expect(body).not.toContain("](http://evil");
     expect(body).not.toContain("\n# Head");
     expect(body).not.toContain("\n- injected");
     expect(body).toContain("\\[x\\]");
-    expect(body).toContain("&lt;img");
+    expect(body).toContain("`<img src=x> *bold* # Head`"); // service text sits in a code span: no link, autolink or HTML starts there
   });
 
   test("the PR commit lines are single lines", () => {

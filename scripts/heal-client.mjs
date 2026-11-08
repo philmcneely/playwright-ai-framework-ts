@@ -52,6 +52,7 @@
  *     HEAL_PROBE_FROM_SERVICE: "1" to fetch the probe from the service (used only when it is byte-identical to the vendored one)
  *     HEAL_ALLOW_INSECURE: "1" to send the bearer token over http:// to a host other than localhost
  *     HEAL_STORAGE_STATE: Playwright storage-state file used to open the page as a signed-in user (never sent)
+ *     HEAL_ALLOW_ORIGINS: comma separated extra origins the heal browser may load from (default: only BASE_URL's origin)
  *     HEAL_REPO: optional repository name recorded with the heal
  *     BASE_URL: the app under test (default https://the-internet.herokuapp.com, as in config/settings.ts)
  *
@@ -74,13 +75,14 @@ import { cleanInventory, redactTypedValues } from "./heal-redact.mjs";
 export { vendoredProbe };
 export const LIMITS = { files: 20, fileBytes: 256 * 1024, ariaChars: 256 * 1024 };
 const MAX_STACK_FRAMES = 100;
+export const MAX_ROUNDS = 3; // same as options.max_rounds in the request
 const MAX_ERROR_CHARS = 60_000; // the service refuses more than 64 KB of error text, and any line over 8 KB
 const MAX_ERROR_LINE = 8_000;
 const MAX_REPLY_CHARS = 8 * 1024 * 1024;
 const MAX_IMAGE_BYTES = 4 * 1024 * 1024; // the service refuses a decoded PNG over 4 MB (413)
 const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "::1", "[::1]"]);
 const NETWORK_SCHEMES = new Set(["http:", "https:", "ws:", "wss:"]);
-const HEAL_ID = /^[A-Za-z0-9_.:-]{1,100}$/;
+const HEAL_ID = /^[A-Za-z0-9][A-Za-z0-9_:-]{0,99}$/; // no dots at all: `.` and `..` would be path segments
 const SOURCE_EXT = /\.(?:[cm]?[jt]s|[jt]sx)$/;
 export const DEFAULT_BASE_URL = "https://the-internet.herokuapp.com";
 // eslint-disable-next-line no-control-regex
@@ -126,6 +128,7 @@ export function settingsFromEnv(env = process.env) {
     roots: sourceRoots(env),
     storageState: env.HEAL_STORAGE_STATE || null,
     baseUrl: env.BASE_URL || DEFAULT_BASE_URL,
+    allowOrigins: (env.HEAL_ALLOW_ORIGINS ?? "").split(",").map((o) => o.trim()).filter(Boolean),
   };
 }
 
@@ -168,6 +171,7 @@ export class ServiceClient {
         method,
         headers: { ...this.headers, ...(body === undefined ? {} : { "Content-Type": "application/json" }) },
         body: body === undefined ? undefined : JSON.stringify(body),
+        redirect: "error", // a redirect would carry the request (and the token) to another host
         signal: AbortSignal.timeout(this.timeoutMs),
       });
       text = await resp.text();
@@ -234,9 +238,19 @@ export class ServiceClient {
 }
 
 // ---- the failure: stack, test id, source files, route --------------------------------------------------------------------
+const INPUT_CALL = /\b(fill|type|pressSequentially|press|setInputFiles|selectOption)\(\s*(?:'(?:[^'\\\n]|\\.)*'|"(?:[^"\\\n]|\\.)*"|`[^`\n]*`)/g;
+
+/** An error text without what a test typed or what an assertion compared: the Received / Expected values and the string handed
+ * to fill(), type(), press() and the like in a code frame. The locator and call-log lines triage needs stay. */
+export function redactErrorValues(text) {
+  return text.split("\n").map((line) => line
+    .replace(/^(\s*(?:Received|Expected)(?: string| pattern| value| array| substring)?:).*$/, "$1 <redacted>")
+    .replace(INPUT_CALL, "$1(<redacted>")).join("\n");
+}
+
 /** `text` without colour codes, the repository's absolute path, or more than the service accepts (a line is cut at 8 KB). */
 export function cleanError(text, root) {
-  const bare = String(text ?? "").replace(ANSI, "").split(root + path.sep).join("").split(root).join(".");
+  const bare = redactErrorValues(String(text ?? "").replace(ANSI, "")).split(root + path.sep).join("").split(root).join(".");
   return bare.split(/\r\n|\r|\n/).map((l) => (l.length > MAX_ERROR_LINE ? l.slice(0, MAX_ERROR_LINE) : l)).join("\n")
     .slice(0, MAX_ERROR_CHARS);
 }
@@ -317,6 +331,20 @@ export function routeFromSource(content) {
     return null;
   }
 }
+
+/** `route` as a same-origin path to open: it starts with a single `/` (no `//`, scheme or backslash, no control character) and
+ * resolves against `baseUrl` to the same origin. null otherwise. Routes come from files and reports, so they are untrusted. */
+export function safeRoute(route, baseUrl) {
+  if (typeof route !== "string" || !route.startsWith("/") || route.startsWith("//") || route.includes("\\") || BAD_ROUTE.test(route)) return null;
+  try {
+    const base = new URL(baseUrl);
+    return new URL(route, base).origin === base.origin ? route : null;
+  } catch {
+    return null;
+  }
+}
+// eslint-disable-next-line no-control-regex
+const BAD_ROUTE = /[\u0000-\u001f\u007f-\u009f\s]/;
 
 export function clientVersion(root) {
   try {
@@ -436,6 +464,8 @@ export function planPatches(candidate, sent, roots, root) {
     if (expressionSpans(next, rel) === null) throw new PatchRefused(`the patched ${rel} would not parse`, true);
     planned.push({ rel, original: raw, newText: next });
   }
+  // what this heal actually writes: the decision is built from it, never from what the service says afterwards
+  planned.main = { file: str(candidate.patch?.file), from: str(candidate.patch?.from), to: str(candidate.patch?.to) };
   return planned;
 }
 
@@ -462,8 +492,23 @@ export function replaceFile(file, data) {
   }
 }
 
+const bytesOf = (file) => {
+  try {
+    return fs.readFileSync(file);
+  } catch {
+    return null;
+  }
+};
+
+/** Write each planned file, after checking once more that it still holds the bytes that were planned from (a file edited since
+ * the plan is never overwritten). */
 export function writeFiles(root, planned, write = replaceFile) {
-  for (const pf of planned) write(path.join(root, pf.rel), Buffer.from(pf.newText, "utf8"));
+  for (const pf of planned) {
+    const file = path.join(root, pf.rel);
+    const now = bytesOf(file);
+    if (now === null || sha256(now) !== sha256(pf.original)) throw new Error(`${pf.rel} changed since the patch was planned, so it is not written`);
+    write(file, Buffer.from(pf.newText, "utf8"));
+  }
 }
 
 /** Put every file's original bytes back. One file failing does not stop the others; the first error is thrown after. */
@@ -471,7 +516,12 @@ export function revertFiles(root, planned, write = replaceFile) {
   let first = null;
   for (const pf of planned) {
     try {
-      write(path.join(root, pf.rel), pf.original);
+      const file = path.join(root, pf.rel);
+      const now = bytesOf(file);
+      if (now !== null && sha256(now) === sha256(pf.original)) continue; // nothing of ours to undo
+      // only our own edit is undone: a file someone else changed since is left as it is
+      if (now === null || sha256(now) !== sha256(Buffer.from(pf.newText, "utf8"))) throw new Error(`${pf.rel} was changed by someone else, so it is left as it is`);
+      write(file, pf.original);
     } catch (e) {
       first ??= e; // keep restoring the rest
     }
@@ -505,21 +555,28 @@ function originOf(url) {
  * (or anything a page wires to run while it is evaluated) cannot send what it reads to another site. Outside a probe every
  * request goes through untouched. */
 export class OriginGuard {
-  constructor(baseUrl) {
+  /** `always` blocks foreign origins for the whole session; `allow` lists extra origins that may load. */
+  constructor(baseUrl, { always = false, allow = [] } = {}) {
     this.origin = originOf(baseUrl);
+    this.allowed = new Set([this.origin, ...allow.map(originOf)]);
+    this.always = always;
     this.probing = false;
+  }
+
+  /** True when `url` is a network request to an origin that may not load. */
+  foreign(url) {
+    try {
+      return NETWORK_SCHEMES.has(new URL(url).protocol) && !this.allowed.has(originOf(url));
+    } catch {
+      return false;
+    }
   }
 
   async handle(route, request = null) {
     const url = (request ?? route.request()).url();
-    let foreign = false;
+    const foreign = this.foreign(url);
     try {
-      foreign = NETWORK_SCHEMES.has(new URL(url).protocol) && originOf(url) !== this.origin;
-    } catch {
-      foreign = false;
-    }
-    try {
-      if (this.probing && foreign) await route.abort();
+      if ((this.probing || this.always) && foreign) await route.abort();
       else await route.continue();
     } catch {
       /* the page closed under the route */
@@ -544,7 +601,12 @@ export function pngSize(buf) {
   return { width: buf.readUInt32BE(16), height: buf.readUInt32BE(20) };
 }
 
-const PASSWORD = 'input[type="password" i]';
+const COUNT_TIMEOUT_MS = 5000;
+// every field that holds a secret or a card, whatever its type: painted over in any screenshot
+const PASSWORD = [
+  'input[type="password" i]', 'input[autocomplete^="cc-" i]', 'input[autocomplete="one-time-code" i]',
+  'input[autocomplete="current-password" i]', 'input[autocomplete="new-password" i]',
+];
 
 /** A fresh Chromium on the failing route (HEAL_STORAGE_STATE when set). It stays open for the whole heal so each candidate
  * can be checked on the same page the inventory came from. With HEAL_VISION off it never takes a screenshot. */
@@ -556,7 +618,8 @@ export class LivePage {
     this.probeFn = probeFunction(probe);
     this.inventory = [];
     this.language = "";
-    this.guard = new OriginGuard(settings.baseUrl);
+    // foreign origins are blocked for the whole session (the page load too), not only while the probe runs
+    this.guard = new OriginGuard(settings.baseUrl, { always: true, allow: settings.allowOrigins ?? [] });
     this.notes = [];
     this.browser = null;
     this.page = null;
@@ -570,9 +633,14 @@ export class LivePage {
       live.browser = await chromium.launch();
       const ctx = await live.browser.newContext({
         baseURL: settings.baseUrl,
+        serviceWorkers: "block", // a service worker would answer requests outside the route handler
         ...(settings.storageState ? { storageState: settings.storageState } : {}),
       });
       await ctx.route("**/*", (r) => live.guard.handle(r));
+      await ctx.routeWebSocket("**/*", (ws) => {
+        if (live.guard.foreign(ws.url().replace(/^ws/, "http"))) void ws.close();
+        else ws.connectToServer();
+      });
       live.page = await ctx.newPage();
       live.response = await live.page.goto(live.route);
     } catch (e) {
@@ -605,6 +673,11 @@ export class LivePage {
     this.language = pageLanguage(meta.lang, meta.browser_lang, header);
     let aria = null;
     try {
+      // what a person typed into an editable region is page text in the snapshot: empty those regions in this throwaway page
+      await this.page.evaluate(() => {
+        // eslint-disable-next-line no-undef -- runs in the page
+        for (const el of document.querySelectorAll("[contenteditable]:not([contenteditable=false i])")) el.textContent = "";
+      });
       aria = redactTypedValues(await this.guard.active(() => this.page.locator("body").ariaSnapshot()));
     } catch {
       /* no snapshot */
@@ -637,7 +710,7 @@ export class LivePage {
   async screenshot() {
     try {
       const frames = this.page.frames?.() ?? [this.page];
-      const selectors = [PASSWORD, ...this.settings.mask];
+      const selectors = [...PASSWORD, ...this.settings.mask];
       const mask = frames.flatMap((f) => selectors.map((s) => f.locator(s)));
       const buf = await this.guard.active(() => this.page.screenshot({
         type: "png", fullPage: false, mask, animations: "disabled", caret: "initial", scale: "css",
@@ -656,7 +729,9 @@ export class LivePage {
   async check(expression) {
     const loc = buildLocator(this.page, expression);
     if (loc === null) return [null, null];
-    const count = await loc.count();
+    // a page that never answers (or a pattern that never finishes) is "cannot check", not a hang
+    const count = await Promise.race([loc.count(), new Promise((resolve) => setTimeout(resolve, COUNT_TIMEOUT_MS, null))]);
+    if (count === null) return [null, null];
     if (count !== 1) return [count, null];
     const data = await this.guard.active(() => loc.evaluate(this.probeFn));
     const facts = cleanInventory(data?.items ?? [])[0];
@@ -736,7 +811,9 @@ export class Healer {
     const files = collectSource(stack, roots, this.root);
     const sent = Object.fromEntries(files.map((f) => [f.path, f.sha256]));
     const lastPass = this.lastPass(stack);
-    const route = lastPass?._page ?? failure.route ?? files.map((f) => routeFromSource(f.content)).find(Boolean) ?? "/";
+    const baseUrl = this.settings.baseUrl;
+    const route = [lastPass?._page, failure.route, ...files.map((f) => routeFromSource(f.content))]
+      .map((r) => safeRoute(r, baseUrl)).find(Boolean) ?? "/";
     if (lastPass) delete lastPass._page;
     const probe = await this.service.probeJs();
     const live = await this.liveFactory(route, probe);
@@ -748,9 +825,15 @@ export class Healer {
       notes = live.notes ?? [];
       const request = buildRequest(failure, files, stack, snap, this.settings, this.root, lastPass, this.runId);
       resp = await this.service.heal(request);
+      let rounds = 0;
       while (resp.status === "try" && resp.candidate) {
+        if (rounds >= MAX_ROUNDS) { // the client ends it: a service that keeps asking is not trusted with more checks
+          resp = { ...resp, status: "needs_human", reason: "max_rounds", why: `the client stopped after ${MAX_ROUNDS} candidates` };
+          break;
+        }
+        rounds += 1;
         [resp, kept] = await this.tryCandidate(failure, resp, live, sent, live.language);
-        if (kept.length) break;
+        if (kept.length) break; // healed: nothing more is asked or checked
       }
     } finally {
       await live.close?.();
@@ -792,7 +875,8 @@ export class Healer {
     }
     const [count, ref] = await live.check(expression); // nothing has been edited yet
     if (count !== 1 || ref !== expected) {
-      const report = { count };
+      // coarse: 0, 1, or 2 for "more than one", so a candidate cannot be used to count what a page holds
+      const report = { count: count === null ? null : Math.min(count, 2) };
       if (ref) report.hit = { ref };
       return [await this.report(healId, report), []];
     }
@@ -863,19 +947,22 @@ export class Healer {
 
   decision(resp, kept) {
     const u = resp.usage && typeof resp.usage === "object" ? resp.usage : {};
-    const num = (v) => (Number.isFinite(Number(v)) ? Number(v) : 0);
+    const num = (v) => (Number.isFinite(Number(v)) ? Math.min(Math.max(Number(v), 0), 1e9) : 0);
+    const text = (v, n = 300) => (typeof v === "string" ? v.slice(0, n) : null);
     const out = {
-      heal_id: resp.heal_id, reason: resp.reason, why: resp.why, rounds: resp.round, settled_at: resp.settled_at,
+      heal_id: text(resp.heal_id, 100), reason: text(resp.reason, 80), why: text(resp.why), rounds: num(resp.round),
+      settled_at: resp.settled_at === null || resp.settled_at === undefined ? null : num(resp.settled_at),
       usage: { calls: num(u.calls), input_tokens: num(u.input_tokens), output_tokens: num(u.output_tokens), images: num(u.images) },
     };
-    if (resp.status === "healed" && kept.length && resp.candidate) {
-      const p = resp.candidate.patch;
+    const cand = resp.candidate && typeof resp.candidate === "object" ? resp.candidate : {};
+    if (resp.status === "healed" && kept.length && kept.main) {
+      // what was written, not what the service's last reply says about it
       Object.assign(out, {
-        outcome: "healed", file: p.file, to: p.to, strategy: resp.candidate.strategy, tier_movement: resp.candidate.tier_movement,
-        why: resp.candidate.why, files: kept.map((pf) => pf.rel),
+        outcome: "healed", file: kept.main.file, to: kept.main.to, strategy: text(cand.strategy, 40), tier_movement: text(cand.tier_movement, 10),
+        why: text(cand.why) ?? out.why, files: kept.map((pf) => pf.rel),
       });
-      out.from = p.from;
-      out.source = `heal service (settled at step ${resp.settled_at})`;
+      out.from = kept.main.from;
+      out.source = `heal service (settled at step ${out.settled_at})`;
     } else if (resp.status === "not_drift") {
       out.outcome = "not_drift";
     } else {

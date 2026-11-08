@@ -21,6 +21,7 @@
  *       exactly one node (a span inside a string or a comment, or one that cuts a node in half, is not a node)
  *     - importsHelper / withHelperImport: a real `import { byLanguage }` statement is found in the tree (a comment or a
  *       string that says so does not count) and added after the last import when it is missing
+ *     - probingSelector: selectors that read a value back (prefix/suffix/substring operators, `value`, `:has-text`, hidden inputs) are refused
  *     - toUtf16Index: the service counts spans in code points; JavaScript strings count UTF-16 units
  *     - awaitAllowedAt: whether an `await` may be written where a patch goes (async function or module top level)
  *
@@ -45,12 +46,12 @@ const ROOT_METHODS = new Set([
 ]);
 const LANG_KEY = /^[a-z]{2,3}$/;
 // control, format (bidi), line and paragraph separators: anything that can hide or end a line differently from how it reads
-const BAD_CHARS = /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u;
+const BAD_CHARS = /[\p{Cc}\p{Cf}\p{Cs}\p{Zl}\p{Zp}]/u;
 const K = ts.SyntaxKind;
 
 /** True when `text` holds a control character (a carriage return, form feed, tab, NUL, C1), a bidi or other format
  * character, or a line or paragraph separator. */
-export const hasControl = (text) => BAD_CHARS.test(text);
+export const hasControl = (text) => BAD_CHARS.test(text) || Buffer.from(text, "utf8").toString("utf8") !== text; // a lone surrogate is not text
 
 // ---- parsing -------------------------------------------------------------------------------------------------------------
 // An expression is parsed inside `async () => (<text>)` so `await` is legal and a stray `;`, `)` or trailing line comment
@@ -106,8 +107,13 @@ function parseSingle(text) {
 // ---- literals and canonical form -----------------------------------------------------------------------------------------
 class NotLiteral extends Error {}
 
+// A regex that can backtrack for ever on a page's text: a group that holds a quantifier and is itself quantified, or one that is
+// alternation under a quantifier. Refused outright, as is anything long.
+const NESTED_QUANTIFIER = /\((?:[^()\\]|\\.)*(?:[+*]|\{\d)(?:[^()\\]|\\.)*\)[+*{]|\((?:[^()\\]|\\.)*\|(?:[^()\\]|\\.)*\)[+*{]/;
+
 function regexOf(node) {
   const text = node.text;
+  if (text.length > 200 || NESTED_QUANTIFIER.test(text)) throw new NotLiteral("regex");
   const slash = text.lastIndexOf("/");
   try {
     return new RegExp(text.slice(1, slash), text.slice(slash + 1));
@@ -144,6 +150,13 @@ function literalOf(node, flat = false) {
     default: throw new NotLiteral(ts.SyntaxKind[node.kind]);
   }
 }
+
+// A selector that reads a value back one character at a time (prefix, suffix, substring, word or dash matches, or any selector on
+// a `value` attribute), or that probes text or hidden inputs. `[attr=value]` with plain `=` stays: the service writes it.
+const PROBING_SELECTOR = /\[\s*[^\]=\s]+\s*[\^*$~|]=|\[\s*value\s*[\^*$~|]?=|:has-text|:text|:nth-match|text\s*=\s*\/|\btype\s*=\s*["']?hidden/i;
+
+/** True when a locator() selector string may be used to probe page data rather than to find an element. */
+export const probingSelector = (text) => typeof text === "string" && PROBING_SELECTOR.test(text);
 
 const isLiteral = (node) => {
   try {
@@ -219,6 +232,7 @@ function chainReceiver(expr) {
         !ts.isIdentifier(callee.name) || !ALLOWED_LOCATOR_METHODS.has(callee.name.text) || !node.arguments.every(isLiteral)) {
       return null;
     }
+    if (callee.name.text === "locator" && node.arguments.some((a) => ts.isStringLiteral(a) && probingSelector(a.text))) return null;
     first = callee.name.text;
     node = callee.expression;
   }
@@ -326,6 +340,7 @@ export function buildLocator(page, expression) {
         throw new NotLiteral("unsupported call");
       }
       const args = node.arguments.map((a) => literalOf(a));
+      if (callee.name.text === "locator" && probingSelector(args[0])) throw new NotLiteral("probing selector");
       const receiver = walk(callee.expression);
       if (typeof receiver?.[callee.name.text] !== "function") throw new NotLiteral("no such method");
       return receiver[callee.name.text](...args);

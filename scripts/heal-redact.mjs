@@ -33,7 +33,7 @@ export const INVENTORY_KEYS = new Set([
   "data_cy", "class", "name_attr", "title", "alt", "text", "disabled", "hidden", "box", "row", "frame", "shadow",
 ]);
 const DATA_KEY = /^data_[a-z0-9_]{1,60}$/;
-const DROP_KEY = /value|token|csrf|auth|session|secret|email|password|cookie/i;
+const DROP_KEY = /value|token|csrf|auth|session|secret|email|password|cookie|passcode|credential|bearer|api_?key|(^|_)(otp|pin|jwt|ssn|card|cvv|cvc|iban)(_|$)/i;
 const BOX_KEYS = ["x", "y", "width", "height"];
 const FIELD_MAX = 400;
 
@@ -117,8 +117,19 @@ function entry(line) {
 
 const isProperty = (line) => line.replace(/^ +/, "").startsWith("- /");
 
+/** The query and fragment of a `/url:` line (they can carry tokens) and the name of a [selected] option (what a person chose). */
+function stripUrlsAndSelections(line) {
+  const url = /^(\s*- \/url:\s*)(.*?)(\s*)$/.exec(line);
+  if (url) return url[1] + url[2].replace(/[?#].*$/, "") + url[3];
+  return line.replace(/^(\s*- option) (?:"(?:[^"\\]|\\.)*"|'(?:[^']|'')*'|[^\s[]+)(?=(?: \[[^\]]*\])*\s*\[selected\])/, "$1");
+}
+
 /** `yamlText` with the value removed from every input line of an accessibility snapshot, inline or nested. */
 export function redactTypedValues(yamlText) {
+  return redactInputs(yamlText).split(/(?<=\n)/).map(stripUrlsAndSelections).join("");
+}
+
+function redactInputs(yamlText) {
   const out = [];
   const frames = []; // open value-role entries: [indent, role, [child indent or -1]]
   let dropping = -1; // indent of a dropped child whose subtree is being skipped

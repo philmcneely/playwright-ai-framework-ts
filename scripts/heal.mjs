@@ -165,8 +165,26 @@ export async function healFailures(fails, healer, max, verify = verifyPassed) {
   return decisions;
 }
 
+const PLAIN_KEYS = ["test", "outcome", "reason", "why", "heal_id", "rounds", "settled_at", "file", "from", "to", "source", "strategy", "tier_movement"];
+
+/** A decision cut to known keys holding capped strings, plain numbers or string lists, whatever it was built from. */
+function plainDecision(d) {
+  const out = {};
+  for (const k of PLAIN_KEYS) {
+    const v = d?.[k];
+    if (typeof v === "string") out[k] = v.slice(0, 500);
+    else if (typeof v === "number" && Number.isFinite(v)) out[k] = v;
+    else if (v === null) out[k] = null;
+  }
+  const u = d?.usage && typeof d.usage === "object" ? d.usage : {};
+  out.usage = Object.fromEntries(["calls", "input_tokens", "output_tokens", "images"].map((k) => [k, Number.isFinite(Number(u[k])) ? Number(u[k]) : 0]));
+  for (const k of ["files", "notes"]) if (Array.isArray(d?.[k])) out[k] = d[k].filter((x) => typeof x === "string").slice(0, 50).map((x) => x.slice(0, 300));
+  return out;
+}
+
 /** Write heal-summary.json (counts, usage total, every decision) into the test artifacts dir; returns its path. */
-export function writeSummary(decisions, started, runId, directory = null) {
+export function writeSummary(rawDecisions, started, runId, directory = null) {
+  const decisions = rawDecisions.map(plainDecision);
   const dir = resolve(directory ?? process.env.HEAL_ARTIFACTS_DIR ?? "test_artifacts");
   mkdirSync(dir, { recursive: true });
   const counts = Object.fromEntries(["healed", "needs_human", "not_drift"].map((k) => [k, decisions.filter((d) => d.outcome === k).length]));
@@ -181,18 +199,19 @@ export function writeSummary(decisions, started, runId, directory = null) {
 
 const tokens = (d) => {
   const u = d.usage ?? {};
-  return `tokens ${u.input_tokens ?? 0} in / ${u.output_tokens ?? 0} out, ${u.calls ?? 0} call(s)`;
+  const n = (v) => (Number.isFinite(Number(v)) ? Number(v) : 0);
+  return `tokens ${n(u.input_tokens)} in / ${n(u.output_tokens)} out, ${n(u.calls)} call(s)`;
 };
 
 export function printDecisions(decisions, log = console.log) {
   log("\n[heal] decisions:");
   for (const d of decisions) {
     if (d.outcome === "healed") {
-      log(`  [healed] ${d.test}: ${d.file}: ${d.from} -> ${d.to}  (${tokens(d)})`);
+      log(`  [healed] ${oneLine(d.test)}: ${oneLine(d.file)}: ${oneLine(d.from)} -> ${oneLine(d.to)}  (${tokens(d)})`);
     } else {
-      log(`  [${d.outcome}]${d.reason ? ` [${d.reason}]` : ""} ${d.test}: ${d.why}  (${tokens(d)})`);
+      log(`  [${oneLine(d.outcome, 20)}]${d.reason ? ` [${oneLine(d.reason, 80)}]` : ""} ${oneLine(d.test)}: ${oneLine(d.why)}  (${tokens(d)})`);
     }
-    for (const note of d.notes ?? []) log(`      note: ${note}`);
+    for (const note of d.notes ?? []) log(`      note: ${oneLine(note)}`);
   }
   const t = runTotal(decisions);
   log(`[heal] run total: ${t.calls} model call(s), ${t.input_tokens} input / ${t.output_tokens} output tokens, ${t.images} image(s)`);
@@ -208,7 +227,8 @@ export function oneLine(value, limit = 300) {
       const n = c.codePointAt(0);
       return n < 32 || n === 127 || (n >= 0x80 && n < 0xa0) || c === " " || c === " " ? " " : c;
     })
-    .join("");
+    .join("")
+    .replace(/[\p{Cf}\p{Cs}]/gu, ""); // bidi and other format characters change how a line reads on a terminal or a PR
   return text.split(/\s+/).filter(Boolean).join(" ").slice(0, limit);
 }
 
@@ -235,9 +255,9 @@ export const commitLines = (healed) => healed.map((d) => `- ${oneLine(d.test, 20
 /** The PR description. Every string that came from the service or the test run is escaped. */
 export function buildPrBody(healed, other) {
   let body = "Automated locator healing (out-of-band).\n\n## Healed (locators only, intent preserved)\n";
-  body += healed.map((d) => `- **${mdEscape(d.test)}** -- ${mdCode(d.from)} -> ${mdCode(d.to)} (${mdEscape(d.why || d.source)})`).join("\n");
+  body += healed.map((d) => `- **${mdEscape(d.test)}** -- ${mdCode(d.from)} -> ${mdCode(d.to)} (${mdCode(d.why || d.source)})`).join("\n");
   if (other.length) {
-    body += "\n\n## Needs human review (not touched)\n" + other.map((d) => `- **${mdEscape(d.test)}** -- ${mdEscape(d.why)}`).join("\n");
+    body += "\n\n## Needs human review (not touched)\n" + other.map((d) => `- **${mdEscape(d.test)}** -- ${mdCode(d.why)}`).join("\n");
   }
   return body;
 }

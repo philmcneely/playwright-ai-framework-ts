@@ -153,14 +153,47 @@ test.describe("live page", { tag: ["@unit", "@regression"] }, () => {
     }
   });
 
-  test("a request to another origin is aborted only while the probe runs", async () => {
+  test("a request to another origin is aborted for the whole session, unless the origin is allowed", async () => {
     const live = await open();
     try {
       const probe = (url: string) => live.page.evaluate((u: string) => fetch(u, { mode: "no-cors" }).then(() => "sent", () => "blocked"), url);
-      expect(await probe(foreign.url + "/other")).toBe("sent");
+      expect(await probe(foreign.url + "/other")).toBe("blocked");
       expect(await live.guard.active(() => probe(foreign.url + "/other"))).toBe("blocked");
       expect(await live.guard.active(() => probe(app.url + "/other"))).toBe("sent");
       expect(live.guard.probing).toBe(false);
+    } finally {
+      await live.close();
+    }
+    const allowed = await open({ HEAL_ALLOW_ORIGINS: foreign.url });
+    try {
+      expect(await allowed.page.evaluate((u: string) => fetch(u, { mode: "no-cors" }).then(() => "sent", () => "blocked"), foreign.url + "/other")).toBe("sent");
+    } finally {
+      await allowed.close();
+    }
+  });
+
+  test("the page load itself is guarded: a foreign subresource never loads, same-origin ones do", async () => {
+    const live = await open();
+    try {
+      const seen: string[] = [];
+      live.page.on("requestfailed", (r: { url(): string }) => seen.push(r.url()));
+      await live.page.setContent(`<img src="${foreign.url}/pixel.png"><script src="${app.url}/x.js"></script>`);
+      await live.page.waitForTimeout(300);
+      expect(seen.some((u) => u.startsWith(foreign.url))).toBe(true);
+      expect(seen.some((u) => u.startsWith(app.url))).toBe(false);
+    } finally {
+      await live.close();
+    }
+  });
+
+  test("an editable region's text is emptied before the aria snapshot, and a service worker is blocked", async () => {
+    const live = await open();
+    try {
+      await live.page.setContent('<div contenteditable aria-label="Note">TYPED-SECRET</div><p>public</p>');
+      const snap = await live.snapshot();
+      expect(JSON.stringify(snap)).not.toContain("TYPED-SECRET");
+      expect(snap.aria).toContain("public");
+      expect(await live.page.evaluate(() => navigator.serviceWorker?.getRegistrations().then((r) => r.length) ?? 0)).toBe(0);
     } finally {
       await live.close();
     }

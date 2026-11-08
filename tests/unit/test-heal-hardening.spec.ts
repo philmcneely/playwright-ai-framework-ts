@@ -1,0 +1,249 @@
+/**
+ * Unit tests: the second security review of the heal client (oracle, route, redirect, redaction, output, decision, regex).
+ *
+ * One group per finding. Each test states the attack it stops: a service that reads hidden page data a character at a time through
+ * candidate locators, a route that sends the heal browser to another origin, a redirect that carries the request away, secrets that
+ * survive redaction, terminal and PR text that lies, a decision that does not match what was written, a regex that never finishes.
+ *
+ * @tags @unit @security
+ */
+import { test, expect } from "@playwright/test";
+import { chmodSync, rmSync, writeFileSync } from "node:fs";
+import path from "node:path";
+import { checkReplacement, hasControl, probingSelector, validateReplacement, buildLocator } from "../../scripts/heal-code.mjs";
+import {
+  HealServiceError, LivePage, MAX_ROUNDS, OriginGuard, ServiceClient, cleanError, planPatches, redactErrorValues, revertFiles, safeRoute,
+  settingsFromEnv, writeFiles,
+} from "../../scripts/heal-client.mjs";
+import { cleanInventory, redactTypedValues } from "../../scripts/heal-redact.mjs";
+import { buildPrBody, oneLine, printDecisions } from "../../scripts/heal.mjs";
+import {
+  FROM, FakeLive, FakeService, PAGE_FILE, PAGE_SRC, TO, Verify, candidate, failureFor, healer, makeProject, read, reply, sha,
+} from "./heal-helpers.js";
+
+let root = "";
+test.beforeEach(() => {
+  root = makeProject();
+});
+test.afterEach(() => rmSync(root, { recursive: true, force: true }));
+const O = "page.locator('#a')";
+
+test.describe("M1 oracle", { tag: ["@unit", "@security", "@regression"] }, () => {
+  const probing = [
+    "input[name=csrf][value^='ab']", "input[value*='x']", "[data-k$='z']", "[data-k~='z']", "[data-k|='z']", "[value='x']", "input[value=x]",
+    "div:has-text('secret')", "input:text('x')", "input[type=hidden]", "input[type='hidden']",
+  ];
+  for (const sel of probing) {
+    test(`a probing selector is refused: ${sel}`, () => {
+      expect(probingSelector(sel)).toBe(true);
+      expect(validateReplacement(`page.locator(${JSON.stringify(sel)})`, O)).toBeNull();
+      expect(checkReplacement(`page.locator(${JSON.stringify(sel)})`, O)).not.toBeNull();
+      expect(buildLocator({ locator: () => ({}) }, `page.locator(${JSON.stringify(sel)})`)).toBeNull();
+    });
+  }
+  for (const sel of ["[data-qa='x']", '[data-qa="order-row-1"]', "input[name=user]", "#user-name", "tr[data-row=a] td", "[data-qa=status]"]) {
+    test(`a selector the service writes still passes: ${sel}`, () => {
+      expect(probingSelector(sel)).toBe(false);
+      expect(validateReplacement(`page.locator(${JSON.stringify(sel)})`, O)).not.toBeNull();
+    });
+  }
+
+  test("rounds are capped by the client, and a healed answer ends the loop", async () => {
+    const tries = Array.from({ length: 8 }, (_, i) => reply("try", candidate(root, { to: `this.page.locator('#u${i}')` }), { rnd: i + 1 }));
+    const svc = new FakeService(tries);
+    const live = new FakeLive({}, "en", [{ ref: "e0", tag: "input" }]);
+    live.check = async (e: string) => (live.asked.push(e), [1, "e9"]);
+    const d = await healer(root, svc, new Verify(), live).heal(failureFor(root));
+    expect(live.asked).toHaveLength(MAX_ROUNDS);
+    expect(svc.posts("/result")).toHaveLength(MAX_ROUNDS);
+    expect(d).toMatchObject({ outcome: "needs_human", reason: "max_rounds" });
+  });
+
+  test("a failed expected-ref check reports a coarse count (0, 1 or 2 for more than one)", async () => {
+    for (const [n, want] of [[0, 0], [1, 1], [7, 2], [4000, 2]] as const) {
+      const svc = new FakeService([reply("try", candidate(root)), reply("needs_human", null, { reason: "x" })]);
+      await healer(root, svc, new Verify(), new FakeLive({ [TO]: [n, null] })).heal(failureFor(root));
+      expect(svc.posts("/result")[0]).toEqual({ count: want });
+    }
+  });
+
+  test("a count that never answers is cannot-check, not a hang", async () => {
+    const live = new LivePage(settingsFromEnv({ BASE_URL: "http://localhost:1" }), "/", "probe");
+    live.page = { locator: () => ({ count: () => new Promise(() => undefined) }) };
+    const t0 = Date.now();
+    expect(await live.check("page.locator('#a')")).toEqual([null, null]);
+    expect(Date.now() - t0).toBeLessThan(8000);
+  });
+});
+
+test.describe("M2 route", { tag: ["@unit", "@security", "@regression"] }, () => {
+  const base = "http://app.example:8080";
+  for (const bad of ["//evil.example/x", "http://evil.example/", "https://app.example:8080/", "\\\\evil.example", "/a\\b", "/a\nb", "/a b", "javascript:alert(1)", "", null, 5, "/\u0085x"]) {
+    test(`a route that is not a same-origin path is refused: ${JSON.stringify(bad)}`, () => {
+      expect(safeRoute(bad as string, base)).toBeNull();
+    });
+  }
+  test("a path stays", () => {
+    expect(safeRoute("/app/index.html", base)).toBe("/app/index.html");
+    expect(safeRoute("/", base)).toBe("/");
+  });
+
+  test("a hostile route from the failure is not opened: the heal opens / instead", async () => {
+    const routes: string[] = [];
+    const svc = new FakeService([reply("not_drift")]);
+    const f = { ...failureFor(root), route: "//evil.example/admin" };
+    const h = healer(root, svc, new Verify(), new FakeLive(), { liveFactory: (r: string) => (routes.push(r), new FakeLive()) });
+    await h.heal(f);
+    expect(routes).toEqual(["/login"]); // the page object's own url, a clean path
+  });
+
+  test("the guard blocks foreign origins for the whole session, with an allow list", () => {
+    const g = new OriginGuard("http://app.example", { always: true, allow: ["https://cdn.example"] });
+    expect(g.foreign("http://evil.example/x")).toBe(true);
+    expect(g.foreign("https://cdn.example/lib.js")).toBe(false);
+    expect(g.foreign("http://app.example/x")).toBe(false);
+    expect(g.foreign("data:text/plain,x")).toBe(false);
+    expect(g.foreign("ws://evil.example/")).toBe(true);
+  });
+});
+
+test.describe("M3 redirect", { tag: ["@unit", "@security", "@regression"] }, () => {
+  test("fetch is told to refuse a redirect, so the request and the token stay with the configured host", async () => {
+    let init: RequestInit | undefined;
+    const client = new ServiceClient("https://svc.example", "tok", { fetchImpl: (async (_u: unknown, i: RequestInit) => ((init = i), new Response("{}", { status: 200 }))) as typeof fetch, env: {} });
+    await client.heal({});
+    expect(init?.redirect).toBe("error");
+    const failing = new ServiceClient("https://svc.example", "tok", { fetchImpl: (async () => { throw new TypeError("redirect mode is set to error"); }) as typeof fetch, env: {} });
+    await expect(failing.heal({})).rejects.toBeInstanceOf(HealServiceError);
+  });
+  test("a heal id is a plain token: dots and slashes never reach the path", async () => {
+    const client = new ServiceClient("https://svc.example", "", { fetchImpl: (async () => new Response("{}")) as typeof fetch, env: {} });
+    for (const id of ["..", ".", "../x", "a/b", "a%2Fb", "", "a".repeat(101), ".hidden"]) await expect(client.result(id, {})).rejects.toThrow(/bad heal id/);
+    await client.result("h_ok:1-2", {});
+  });
+});
+
+test.describe("M4 redaction", { tag: ["@unit", "@security", "@regression"] }, () => {
+  test("the query and fragment of a url line go", () => {
+    const out = redactTypedValues('- link "Reset":\n  - /url: /reset?token=SECRET#frag\n- link "B":\n  - /url: https://x.example/p?a=1\n');
+    expect(out).not.toMatch(/SECRET|a=1|frag/);
+    expect(out).toContain("/url: /reset\n");
+    expect(out).toContain("/url: https://x.example/p\n");
+  });
+  test("the name of a selected option goes, an unselected one stays", () => {
+    const out = redactTypedValues('- combobox "Plan":\n  - option "Gold" [selected]\n  - option "Silver"\n');
+    expect(out).not.toContain("Gold");
+    expect(out).toContain('option "Silver"');
+    expect(out).toContain("option [selected]");
+  });
+  test("secret-looking data attributes are dropped", () => {
+    const keys = Object.keys(cleanInventory([{
+      data_otp: "1", data_pin: "2", data_api_key: "3", data_jwt: "4", data_ssn: "5", data_card_number: "6", data_cvv: "7", data_passcode: "8",
+      data_shipping: "kept", data_mapping: "kept", data_row: "kept",
+    }])[0]);
+    expect(keys.sort()).toEqual(["data_mapping", "data_row", "data_shipping"]);
+  });
+  test("Received / Expected values and fill() frames leave the error text; the locator and call log stay", () => {
+    const text = [
+      "Error: expect(locator).toHaveText(expected)", "Locator: getByTestId('summary')", 'Expected: "SECRET-EXPECTED"', "Received string: \"SECRET-RECEIVED\"",
+      "Call log:", "  - waiting for getByLabel('Password')", "> 12 | await page.getByLabel('Password').fill('hunter2');", '  13 | await x.type("abc123");',
+      "  14 | await page.press(`Enter`);",
+    ].join("\n");
+    const out = redactErrorValues(text);
+    for (const leaked of ["SECRET-EXPECTED", "SECRET-RECEIVED", "hunter2", "abc123"]) expect(out).not.toContain(leaked);
+    expect(out).toContain("Locator: getByTestId('summary')");
+    expect(out).toContain("waiting for getByLabel('Password')");
+    expect(out).toContain("fill(<redacted>");
+    expect(cleanError(text, root)).not.toContain("hunter2");
+  });
+});
+
+test.describe("L5 surrogates", { tag: ["@unit", "@security", "@regression"] }, () => {
+  test("a lone surrogate is not text, and a pair is", () => {
+    expect(hasControl("a\ud800b")).toBe(true);
+    expect(hasControl("\udc00")).toBe(true);
+    expect(hasControl("café \u{1F600}")).toBe(false);
+    expect(validateReplacement('page.locator("\ud800")', O)).toBeNull();
+    expect(checkReplacement('page.getByText("\ud800x")', O)).not.toBeNull();
+  });
+});
+
+test.describe("L6 output", { tag: ["@unit", "@security", "@regression"] }, () => {
+  test("escape sequences and bidi characters never reach the terminal", () => {
+    expect(oneLine("a\u001b[31mred\u001b]52;c;x\u0007 ‮evil⁦")).toBe("a [31mred ]52;c;x evil");
+    const lines: string[] = [];
+    printDecisions([{ test: "t", outcome: "needs_human", reason: "r\u001b[31m", why: "\u001b[2J fake‮", usage: { calls: "x" as never } }] as never[], (l) => lines.push(l));
+    // eslint-disable-next-line no-control-regex
+    expect(lines.join("\n")).not.toMatch(/[\u001b‮]/);
+    expect(lines.join("\n")).toContain("0 call(s)");
+  });
+  test("service text in a PR body sits in code spans: no autolink, no link, no bidi", () => {
+    const body = buildPrBody([{ test: "t", from: "a", to: "b", why: "see https://evil.example/login or www.evil.example ‮evil" }] as never[], [{ test: "u", why: "https://evil.example" }] as never[]);
+    for (const m of body.matchAll(/https?:\/\/\S+|www\.\S+/g)) {
+      const before = body.slice(0, m.index);
+      expect(before.split("`").length % 2, `inside a code span: ${m[0]}`).toBe(0);
+    }
+    expect(body).not.toContain("‮");
+  });
+  test("a decision holds capped strings and plain numbers whatever the service sent", async () => {
+    const deep = { a: [{ b: [1] }] }; // not a string, not a number
+    const svc = new FakeService([{ heal_id: "h_1", status: "needs_human", reason: deep, why: "x".repeat(10_000), usage: { calls: "9", input_tokens: deep }, round: {}, settled_at: [] }]);
+    const d = await healer(root, svc, new Verify()).heal(failureFor(root));
+    expect(d.reason).toBeNull();
+    expect((d.why as string).length).toBeLessThanOrEqual(300);
+    expect(d.usage).toEqual({ calls: 9, input_tokens: 0, output_tokens: 0, images: 0 });
+    expect(JSON.stringify(d).length).toBeLessThan(2000);
+  });
+});
+
+test.describe("L7 decision from what was written", { tag: ["@unit", "@security", "@regression"] }, () => {
+  test("a healed answer with a different or empty candidate does not change the decision or leave the edit unreported", async () => {
+    const svc = new FakeService([reply("try", candidate(root)), { heal_id: "h_1", status: "healed", candidate: {}, usage: {} }]);
+    const d = await healer(root, svc, new Verify(root, [true])).heal(failureFor(root));
+    expect(d).toMatchObject({ outcome: "healed", file: PAGE_FILE, from: FROM, to: TO, files: [PAGE_FILE] });
+    expect(read(root)).toContain(TO);
+  });
+});
+
+test.describe("L8 and notes: writes", { tag: ["@unit", "@security", "@regression"] }, () => {
+  test("a file edited between the plan and the write is not overwritten, and not rolled back over", () => {
+    const planned = planPatches(candidate(root), { [PAGE_FILE]: sha(PAGE_SRC) }, ["pages"], root);
+    writeFileSync(path.join(root, PAGE_FILE), PAGE_SRC + "// a person's edit\n");
+    expect(() => writeFiles(root, planned)).toThrow(/changed since the patch was planned/);
+    expect(read(root)).toBe(PAGE_SRC + "// a person's edit\n");
+    expect(() => revertFiles(root, planned)).toThrow(/changed by someone else/);
+    expect(read(root)).toBe(PAGE_SRC + "// a person's edit\n");
+  });
+  test("a revert undoes our own edit, and does nothing when the file was never written", () => {
+    const planned = planPatches(candidate(root), { [PAGE_FILE]: sha(PAGE_SRC) }, ["pages"], root);
+    revertFiles(root, planned);
+    expect(read(root)).toBe(PAGE_SRC);
+    chmodSync(path.join(root, PAGE_FILE), 0o640);
+    writeFiles(root, planned);
+    revertFiles(root, planned);
+    expect(read(root)).toBe(PAGE_SRC);
+  });
+  test("inputs for cards, one-time codes and passwords are masked by default in a screenshot", async () => {
+    const live = new LivePage(settingsFromEnv({ BASE_URL: "http://localhost:1", HEAL_VISION: "on" }), "/", "probe");
+    const asked: string[] = [];
+    live.page = {
+      frames: () => [{ locator: (s: string) => (asked.push(s), s) }],
+      screenshot: async () => null,
+    };
+    await live.screenshot();
+    for (const need of ['type="password"', 'autocomplete^="cc-"', 'one-time-code', 'current-password']) expect(asked.some((s) => s.includes(need)), need).toBe(true);
+  });
+});
+
+test.describe("L9 regex", { tag: ["@unit", "@security", "@regression"] }, () => {
+  for (const re of ["/^(a+)+$/", "/(a*)*b/", "/(a|aa)+$/", "/(x+x+)+y/", "/(.*a){20}/"]) {
+    test(`a regex that can backtrack for ever is refused: ${re}`, () => {
+      expect(validateReplacement(`page.getByText(${re})`, O)).toBeNull();
+    });
+  }
+  test("a long regex is refused, an ordinary one stays", () => {
+    expect(validateReplacement(`page.getByText(/${"a".repeat(250)}/)`, O)).toBeNull();
+    expect(validateReplacement("page.getByText(/log ?in/i)", O)).not.toBeNull();
+    expect(validateReplacement("page.getByRole('button', { name: /^Save( changes)?$/ })", O)).not.toBeNull();
+  });
+});
