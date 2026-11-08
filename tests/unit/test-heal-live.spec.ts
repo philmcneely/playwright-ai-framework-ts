@@ -118,7 +118,9 @@ test.describe("live page", { tag: ["@unit", "@regression"] }, () => {
         expect(shot.media_type).toBe("image/png");
         const png = PNG.sync.read(Buffer.from(shot.data, "base64"));
         expect([png.width, png.height]).toEqual([shot.width, shot.height]);
+        expect(snap.viewport.scroll).toEqual({ x: 0, y: 0 });
         const viewport = live.page.viewportSize();
+        expect([snap.viewport.w, snap.viewport.h]).toEqual([viewport.width, viewport.height]);
         expect(shot.width).toBe(viewport.width);
         expect(shot.height).toBe(viewport.height);
         const pixel = (x: number, y: number) => [...png.data.subarray((y * png.width + x) * 4, (y * png.width + x) * 4 + 3)];

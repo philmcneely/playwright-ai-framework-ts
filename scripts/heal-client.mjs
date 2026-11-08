@@ -77,7 +77,7 @@ const MAX_STACK_FRAMES = 100;
 const MAX_ERROR_CHARS = 60_000; // the service refuses more than 64 KB of error text, and any line over 8 KB
 const MAX_ERROR_LINE = 8_000;
 const MAX_REPLY_CHARS = 8 * 1024 * 1024;
-const MAX_IMAGE_BYTES = 6 * 1024 * 1024;
+const MAX_IMAGE_BYTES = 4 * 1024 * 1024; // the service refuses a decoded PNG over 4 MB (413)
 const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "::1", "[::1]"]);
 const NETWORK_SCHEMES = new Set(["http:", "https:", "ws:", "wss:"]);
 const HEAL_ID = /^[A-Za-z0-9_.:-]{1,100}$/;
@@ -619,7 +619,16 @@ export class LivePage {
       language: { html_lang: meta.lang || null, browser_locale: meta.browser_lang || null, content_language: header },
       screenshot: null,
     };
-    if (this.settings.vision !== "off") snap.screenshot = await this.screenshot();
+    if (this.settings.vision !== "off") {
+      snap.screenshot = await this.screenshot();
+      if (snap.screenshot) {
+        // inventory boxes are in document coordinates and the shot is at the current scroll: say where that is, and give
+        // the viewport size (CSS px) read at the moment of the shot
+        const now = await this.page.evaluate(() => ({ w: innerWidth, h: innerHeight })).catch(() => null); // eslint-disable-line no-undef -- runs in the page
+        const scroll = meta.scroll ?? {};
+        snap.viewport = { ...snap.viewport, ...(now ?? {}), scroll: { x: Number(scroll.x) || 0, y: Number(scroll.y) || 0 } };
+      }
+    }
     return snap;
   }
 
