@@ -45,7 +45,7 @@
  *     HEAL_SERVICE_URL: base URL of the heal service, for example http://localhost:8765
  *     HEAL_SERVICE_TOKEN: bearer token, when the service requires one
  *     HEAL_VISION: off (default) | auto | on; anything but off sends one masked viewport screenshot
- *     HEAL_MASK: comma separated selectors to mask in that screenshot (password fields are always masked)
+ *     HEAL_MASK: selectors to mask in that screenshot, one per line or separated by `;;` (so a selector can hold commas)
  *     HEAL_TEST_ID_ATTRIBUTE: the project's test id attribute (default data-testid)
  *     HEAL_SOURCE_ROOTS: comma separated source roots, relative paths inside the repository (default
  *       pages,tests,utils,fixtures)
@@ -89,30 +89,9 @@ export const DEFAULT_BASE_URL = "https://the-internet.herokuapp.com";
 const ANSI = /\u001b\[[0-9;]*[A-Za-z]/g;
 
 // ---- settings ------------------------------------------------------------------------------------------------------------
-/** Split a comma separated list of selectors, keeping commas inside brackets, parentheses and quotes together. */
+/** Split a list of selectors on newlines or `;;`, so a selector may hold commas (`a:is(b, c)`, `[data-x='a,b']`). */
 export function splitSelectors(text) {
-  const out = [];
-  let depth = 0;
-  let quote = "";
-  let cur = "";
-  for (const c of text ?? "") {
-    if (quote) {
-      if (c === quote) quote = "";
-    } else if (c === '"' || c === "'") {
-      quote = c;
-    } else if (c === "(" || c === "[") {
-      depth += 1;
-    } else if ((c === ")" || c === "]") && depth > 0) {
-      depth -= 1;
-    } else if (c === "," && depth === 0) {
-      if (cur.trim()) out.push(cur.trim());
-      cur = "";
-      continue;
-    }
-    cur += c;
-  }
-  if (cur.trim()) out.push(cur.trim());
-  return out;
+  return String(text ?? "").split(/\r?\n|;;/).map((t) => t.trim()).filter(Boolean);
 }
 
 /** What the client reads from the environment. */
@@ -602,11 +581,33 @@ export function pngSize(buf) {
 }
 
 const COUNT_TIMEOUT_MS = 5000;
-// every field that holds a secret or a card, whatever its type: painted over in any screenshot
+// Every field that holds a secret or a card, whatever its type, and every field a person may have switched from password to text:
+// painted over in any screenshot.
+const SECRET_WORDS = ["pass", "pwd", "token", "secret", "ssn", "card", "cvv", "otp"]; // matched in a name or id, any case
 const PASSWORD = [
   'input[type="password" i]', 'input[autocomplete^="cc-" i]', 'input[autocomplete="one-time-code" i]',
-  'input[autocomplete="current-password" i]', 'input[autocomplete="new-password" i]',
+  'input[autocomplete*="password" i]', "[data-heal-was-password]",
+  ...SECRET_WORDS.flatMap((w) => ["name", "id"].flatMap((a) => [`input[${a}*="${w}" i]`, `textarea[${a}*="${w}" i]`])),
 ];
+// Marks every input that is, or ever becomes, type=password (a show-password toggle makes it type=text). Runs in the page before
+// its own scripts; the attribute name holds "password", so the inventory filter drops it.
+const WAS_PASSWORD = `(() => {
+  const nativeSet = Element.prototype.setAttribute;
+  const mark = (el) => nativeSet.call(el, "data-heal-was-password", "1");
+  const isPw = (el) => el instanceof HTMLInputElement && el.type === "password";
+  // a toggle sets the type to text: the type it is leaving is what is remembered
+  const d = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "type");
+  Object.defineProperty(HTMLInputElement.prototype, "type", { configurable: true, enumerable: d.enumerable, get: d.get,
+    set(v) { if (isPw(this) || String(v).toLowerCase() === "password") mark(this); d.set.call(this, v); } });
+  Element.prototype.setAttribute = function (name, value) {
+    if (this instanceof HTMLInputElement && String(name).toLowerCase() === "type" && (isPw(this) || String(value).toLowerCase() === "password")) mark(this);
+    return nativeSet.call(this, name, value);
+  };
+  const scan = (root) => { if (root.querySelectorAll) { if (isPw(root)) mark(root); root.querySelectorAll("input").forEach((i) => isPw(i) && mark(i)); } };
+  new MutationObserver((records) => { for (const r of records) { if (r.type === "attributes") isPw(r.target) && mark(r.target); else r.addedNodes.forEach(scan); } })
+    .observe(document, { attributes: true, attributeFilter: ["type"], childList: true, subtree: true });
+  document.addEventListener("DOMContentLoaded", () => scan(document));
+})();`;
 
 /** A fresh Chromium on the failing route (HEAL_STORAGE_STATE when set). It stays open for the whole heal so each candidate
  * can be checked on the same page the inventory came from. With HEAL_VISION off it never takes a screenshot. */
@@ -636,6 +637,7 @@ export class LivePage {
         serviceWorkers: "block", // a service worker would answer requests outside the route handler
         ...(settings.storageState ? { storageState: settings.storageState } : {}),
       });
+      await ctx.addInitScript(WAS_PASSWORD);
       await ctx.route("**/*", (r) => live.guard.handle(r));
       await ctx.routeWebSocket("**/*", (ws) => {
         if (live.guard.foreign(ws.url().replace(/^ws/, "http"))) void ws.close();
@@ -710,7 +712,13 @@ export class LivePage {
   async screenshot() {
     try {
       const frames = this.page.frames?.() ?? [this.page];
-      const selectors = [...PASSWORD, ...this.settings.mask];
+      // every cross-origin iframe is covered whole: its content is not ours to send
+      const here = originOf(this.page.url?.() ?? "");
+      for (const f of frames) {
+        if (f === this.page.mainFrame?.() || originOf(f.url()) === here) continue;
+        await (await f.frameElement()).evaluate((el) => el.setAttribute("data-heal-mask", "1"));
+      }
+      const selectors = [...PASSWORD, "[data-heal-mask]", ...this.settings.mask];
       const mask = frames.flatMap((f) => selectors.map((s) => f.locator(s)));
       const buf = await this.guard.active(() => this.page.screenshot({
         type: "png", fullPage: false, mask, animations: "disabled", caret: "initial", scale: "css",

@@ -198,3 +198,72 @@ test.describe("live page", { tag: ["@unit", "@regression"] }, () => {
     }
   });
 });
+
+test.describe("screenshot masks by default", { tag: ["@unit", "@security", "@regression"] }, () => {
+  const FIELDS = `<!doctype html><html lang="en"><head><style>
+    body { margin: 0; background: #ffffff; }
+    input, iframe { position: absolute; left: 20px; width: 200px; height: 30px; background: #00aa00; border: 0; }
+    #a { top: 10px; } #b { top: 60px; } #c { top: 110px; } #d { top: 160px; } #plain { top: 210px; background: #0000cc; }
+    iframe { top: 260px; width: 300px; height: 60px; }
+  </style></head><body>
+    <input id="a" name="card_number" value="4111">
+    <input id="b" name="x" type="text" aria-label="show">
+    <input id="c" id2="x" name="otp-code" value="1">
+    <input id="d" type="password" value="pw">
+    <input id="plain" name="nickname" value="visible">
+    <iframe src="__FOREIGN__/frame"></iframe>
+    <script>document.getElementById("b").type = "password"; document.getElementById("b").type = "text";</script>
+  </body></html>`;
+  const shot = async (env: Record<string, string> = {}) => {
+    const html = FIELDS.replace("__FOREIGN__", foreign.url);
+    const page = await serve(html);
+    const live = await LivePage.open(settingsFromEnv({ BASE_URL: page.url, HEAL_VISION: "on", HEAL_ALLOW_ORIGINS: foreign.url, ...env }), "/", vendoredProbe());
+    try {
+      await live.page.waitForLoadState("load");
+      await live.page.waitForSelector("iframe");
+      await live.page.waitForTimeout(300);
+      const snap = await live.snapshot();
+      const png = snap.screenshot ? PNG.sync.read(Buffer.from(snap.screenshot.data, "base64")) : null;
+      return { png, notes: live.notes, snap };
+    } finally {
+      await live.close();
+      page.server.close();
+    }
+  };
+  const px = (png: PNG, x: number, y: number) => [...png.data.subarray((y * png.width + x) * 4, (y * png.width + x) * 4 + 3)];
+
+  test("name or id matches, a show-password toggle and a cross-origin iframe are painted over; a plain field is not", async () => {
+    const { png, snap } = await shot();
+    expect(png).not.toBeNull();
+    for (const y of [25, 75, 125, 175, 290]) expect(px(png!, 100, y), `y=${y}`).toEqual([255, 0, 255]);
+    expect(px(png!, 100, 225)).toEqual([0, 0, 204]); // nickname: visible
+    expect(JSON.stringify(snap.inventory)).not.toContain("heal_was_password"); // the marker never reaches the service
+  });
+
+  test("when masking fails no screenshot is sent", async () => {
+    const live = new LivePage(settingsFromEnv({ BASE_URL: "http://localhost:1", HEAL_VISION: "on" }), "/", "probe");
+    live.page = {
+      url: () => "http://localhost:1/",
+      mainFrame: () => "main",
+      frames: () => [{ url: () => "http://other.example/" , frameElement: async () => { throw new Error("detached"); }, locator: () => ({}) }],
+      screenshot: async () => { throw new Error("must not be taken"); },
+    };
+    expect(await live.screenshot()).toBeNull();
+    expect(live.notes.join(" ")).toContain("no screenshot sent");
+  });
+
+  test("branch code: the client's live check builds each language's branch from the syntax tree", async () => {
+    const live = await open(); // lang="fr" page: the button reads Enregistrer
+    try {
+      await live.snapshot();
+      const en = "this.page.getByRole('button', { name: 'Save changes' })";
+      const fr = "this.page.getByRole('button', { name: 'Enregistrer' })";
+      expect((await live.check(en))[0]).toBe(0);
+      const [count, ref] = await live.check(fr);
+      expect(count).toBe(1);
+      expect(ref).toBe(live.inventory.find((i: { testid?: string }) => i.testid === "save-btn")?.ref);
+    } finally {
+      await live.close();
+    }
+  });
+});

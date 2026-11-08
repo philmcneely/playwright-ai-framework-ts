@@ -228,11 +228,13 @@ test.describe("L8 and notes: writes", { tag: ["@unit", "@security", "@regression
     const live = new LivePage(settingsFromEnv({ BASE_URL: "http://localhost:1", HEAL_VISION: "on" }), "/", "probe");
     const asked: string[] = [];
     live.page = {
-      frames: () => [{ locator: (s: string) => (asked.push(s), s) }],
+      url: () => "http://localhost:1/",
+      mainFrame: () => "main",
+      frames: () => [{ url: () => "http://localhost:1/", locator: (s: string) => (asked.push(s), s) }],
       screenshot: async () => null,
     };
     await live.screenshot();
-    for (const need of ['type="password"', 'autocomplete^="cc-"', 'one-time-code', 'current-password']) expect(asked.some((s) => s.includes(need)), need).toBe(true);
+    for (const need of ['type="password"', 'autocomplete^="cc-"', 'one-time-code', 'autocomplete*="password"', 'name*="card"', 'id*="otp"', 'name*="pwd"', 'textarea[id*="secret"', 'data-heal-was-password']) expect(asked.some((s) => s.includes(need)), need).toBe(true);
   });
 });
 

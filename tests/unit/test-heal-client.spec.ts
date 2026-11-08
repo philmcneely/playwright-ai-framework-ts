@@ -562,7 +562,7 @@ test.describe("matchRef", { tag: ["@unit", "@regression"] }, () => {
 test.describe("settings", { tag: ["@unit", "@regression"] }, () => {
   test("defaults and options", () => {
     const s = settingsFromEnv({
-      HEAL_SERVICE_URL: "http://localhost:8765/", HEAL_VISION: "AUTO", HEAL_MASK: "#pw, .card, [data-x='a,b']",
+      HEAL_SERVICE_URL: "http://localhost:8765/", HEAL_VISION: "AUTO", HEAL_MASK: "#pw;;.card\n[data-x='a,b']",
       HEAL_TEST_ID_ATTRIBUTE: "data-qa", BASE_URL: "http://localhost:7080",
     });
     expect([s.url, s.vision, s.testIdAttribute, s.baseUrl]).toEqual(["http://localhost:8765", "auto", "data-qa", "http://localhost:7080"]);
@@ -572,7 +572,8 @@ test.describe("settings", { tag: ["@unit", "@regression"] }, () => {
     expect(settingsFromEnv({}).roots).toEqual(["pages", "tests", "utils", "fixtures"]);
     expect(settingsFromEnv({ HEAL_VISION: "maybe" }).vision).toBe("off");
     expect(settingsFromEnv({ HEAL_TEST_ID_ATTRIBUTE: "bad attr!" }).testIdAttribute).toBe("data-testid");
-    expect(splitSelectors("a:is(b, c), d")).toEqual(["a:is(b, c)", "d"]);
+    expect(splitSelectors("a:is(b, c);; d\n\n")).toEqual(["a:is(b, c)", "d"]);
+    expect(splitSelectors("a, b")).toEqual(["a, b"]); // a comma is part of a selector now
   });
 
   test("service errors name status and reason, never the request", async () => {

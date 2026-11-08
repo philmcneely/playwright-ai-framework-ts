@@ -43,7 +43,7 @@ Everything is an environment variable; the framework has no model settings.
 | `HEAL_SERVICE_URL` | (required) | The heal service, for example `http://localhost:8765` |
 | `HEAL_SERVICE_TOKEN` | | Bearer token, when the service needs one. Never sent over `http://` to a host other than localhost unless `HEAL_ALLOW_INSECURE=1` |
 | `HEAL_VISION` | `off` | `off`, `auto` or `on`. With `off` the screenshot call is never made and no image bytes leave the client |
-| `HEAL_MASK` | | Comma separated selectors painted over in the screenshot (password fields are always masked) |
+| `HEAL_MASK` | | Selectors painted over in the screenshot, one per line or separated by `;;` (not commas, so a selector can hold them, e.g. `a:is(b, c)`) |
 | `HEAL_TEST_ID_ATTRIBUTE` | `data-testid` | The project's test id attribute; the service writes `getByTestId` only for it |
 | `HEAL_SOURCE_ROOTS` | `pages,tests,utils,fixtures` | Where files may be sent and patched; relative paths inside the repository |
 | `HEAL_STORAGE_STATE` | | Playwright storage-state file used to open the page signed in (never sent) |
@@ -98,7 +98,7 @@ receives branch code. If the service writes `await` in front of it, the client a
 ## Vision
 
 `HEAL_VISION=auto|on` sends **one viewport screenshot** (never full page: a late scroll restore can shift the page under a
-click) with `mask` on every password field and on the `HEAL_MASK` selectors, as
+click) with `mask` on every password field, on every input or textarea whose name or id matches `pass|pwd|token|secret|ssn|card|cvv|otp`, on `cc-*`, `one-time-code` and password autocompletes, on any input that is or ever was `type=password` (a show-password toggle), on every cross-origin iframe, and on the `HEAL_MASK` selectors. If masking fails, no screenshot is sent. It goes out as
 `{media_type: "image/png", data: <base64>, width, height}`, and names the mode in `options.vision`. The service draws the overlay.
 With `off` (the default) the screenshot call is skipped entirely, the request carries `screenshot: null`, and zero image bytes
 leave the client. If a screenshot cannot be taken the heal goes on with text only and the decision carries a note.
