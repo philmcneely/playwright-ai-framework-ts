@@ -123,6 +123,7 @@ export class LivePage {
   close(): Promise<void>;
   snapshot(): Promise<Json>;
   screenshot(): Promise<Json | null>;
+  branchKey(keys: string[]): Promise<string>;
   check(expression: string): Promise<[number | null, string | null]>;
 }
 export function subtag(value: string | null | undefined): string;

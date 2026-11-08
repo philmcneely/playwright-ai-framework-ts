@@ -528,10 +528,10 @@ test.describe("buildLocator", { tag: ["@unit", "@security", "@regression"] }, ()
     expect(loc?.steps).toEqual([["getByRole", ["button", { name: "Go", exact: true }]], ["first", []]]);
   });
 
-  test("regex literals and numbers are arguments", () => {
-    const loc = buildLocator<{ steps: Steps }>(recorder(), "page.getByText(/log ?in/i).nth(-1)");
-    expect(loc?.steps[0][1][0]).toEqual(/log ?in/i);
+  test("numbers are arguments, a regex literal is refused", () => {
+    const loc = buildLocator<{ steps: Steps }>(recorder(), "page.getByText('log in').nth(-1)");
     expect(loc?.steps[1]).toEqual(["nth", [-1]]);
+    expect(buildLocator(recorder(), "page.getByText(/log ?in/i).nth(-1)")).toBeNull();
   });
 
   test("page and this.page are the same receiver", () => {

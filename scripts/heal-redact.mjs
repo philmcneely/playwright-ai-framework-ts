@@ -33,7 +33,7 @@ export const INVENTORY_KEYS = new Set([
   "data_cy", "class", "name_attr", "title", "alt", "text", "disabled", "hidden", "box", "row", "frame", "shadow",
 ]);
 const DATA_KEY = /^data_[a-z0-9_]{1,60}$/;
-const DROP_KEY = /value|token|csrf|auth|session|secret|email|password|cookie|passcode|credential|bearer|api_?key|(^|_)(otp|pin|jwt|ssn|card|cvv|cvc|iban)(_|$)/i;
+const DROP_KEY = /value|token|csrf|auth|session|secret|email|password|cookie|passcode|credential|bearer|api_?key|(^|_)(otp|pin|jwt|ssn|card|cvv|cvc|iban|heal)(_|$)/i; // `heal`: a marker this client sets must never be an inventory key
 const BOX_KEYS = ["x", "y", "width", "height"];
 const FIELD_MAX = 400;
 

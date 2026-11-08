@@ -227,27 +227,34 @@ test.describe("L8 and notes: writes", { tag: ["@unit", "@security", "@regression
   test("inputs for cards, one-time codes and passwords are masked by default in a screenshot", async () => {
     const live = new LivePage(settingsFromEnv({ BASE_URL: "http://localhost:1", HEAL_VISION: "on" }), "/", "probe");
     const asked: string[] = [];
+    const main = { url: () => "http://localhost:1/", locator: (s: string) => (asked.push(s), s), evaluate: async () => undefined };
     live.page = {
       url: () => "http://localhost:1/",
-      mainFrame: () => "main",
-      frames: () => [{ url: () => "http://localhost:1/", locator: (s: string) => (asked.push(s), s) }],
+      mainFrame: () => main,
+      frames: () => [main],
       screenshot: async () => null,
     };
     await live.screenshot();
-    for (const need of ['type="password"', 'autocomplete^="cc-"', 'one-time-code', 'autocomplete*="password"', 'name*="card"', 'id*="otp"', 'name*="pwd"', 'textarea[id*="secret"', 'data-heal-was-password']) expect(asked.some((s) => s.includes(need)), need).toBe(true);
+    for (const need of ['type="password"', 'autocomplete^="cc-"', 'one-time-code', 'autocomplete*="password"', 'name*="card"', 'id*="otp"', 'name*="pwd"', 'textarea[id*="secret"']) expect(asked.some((s) => s.includes(need)), need).toBe(true);
   });
 });
 
-test.describe("L9 regex", { tag: ["@unit", "@security", "@regression"] }, () => {
-  for (const re of ["/^(a+)+$/", "/(a*)*b/", "/(a|aa)+$/", "/(x+x+)+y/", "/(.*a){20}/"]) {
-    test(`a regex that can backtrack for ever is refused: ${re}`, () => {
-      expect(validateReplacement(`page.getByText(${re})`, O)).toBeNull();
+test.describe("L9 / N1 regex", { tag: ["@unit", "@security", "@regression"] }, () => {
+  const calls = [
+    "page.getByText(/a/)", "page.getByLabel(/a/i)", "page.getByRole('button', { name: /^Save/ })", "page.getByPlaceholder(/a/)",
+    "page.getByTitle(/a/)", "page.getByAltText(/a/)", "page.locator('tr').filter({ hasText: /x/ })", "page.locator('tr', { hasText: /x/ })",
+    "page.getByText(/^(a+)+$/)", "page.getByText(/^a*a*a*a*a*a*a*a*$/)", `page.getByText(/${"a".repeat(250)}/)`,
+  ];
+  calls.forEach((c, i) => {
+    test(`a regex argument is refused outright (${i + 1}): ${c.slice(0, 50)}`, () => {
+      expect(validateReplacement(c, O)).toBeNull();
+      expect(checkReplacement(c, O)).not.toBeNull();
+      expect(buildLocator({ locator: () => ({}), getByText: () => ({}) }, c)).toBeNull();
     });
-  }
-  test("a long regex is refused, an ordinary one stays", () => {
-    expect(validateReplacement(`page.getByText(/${"a".repeat(250)}/)`, O)).toBeNull();
-    expect(validateReplacement("page.getByText(/log ?in/i)", O)).not.toBeNull();
-    expect(validateReplacement("page.getByRole('button', { name: /^Save( changes)?$/ })", O)).not.toBeNull();
+  });
+  test("exact strings stay", () => {
+    expect(validateReplacement("page.getByText('log in', { exact: true })", O)).not.toBeNull();
+    expect(validateReplacement("page.getByRole('button', { name: 'Save', exact: true })", O)).not.toBeNull();
   });
 });
 
@@ -301,5 +308,44 @@ test.describe("fingerprint lock", { tag: ["@unit", "@security", "@regression"] }
     const t0 = Date.now();
     expect(await mergeInto(root, { b: rec }, { HEAL_DIR: ".heal" })).toBe(true);
     expect(Date.now() - t0).toBeGreaterThanOrEqual(100);
+  });
+});
+
+test.describe("N1 oracle: engines, escapes, comments and what is reported", { tag: ["@unit", "@security", "@regression"] }, () => {
+  const refused = [
+    "xpath=//input[starts-with(@value,'k')]", "//input", "(//button)[1]", "../x", "css=input >> nth=0", "a >> b", "internal:attr=[value^=\"k\"i]", "text=hidden", "id=a",
+    "data-testid=x", "[\\76 alue=x]", "a\\:b", "a /* c */ b", "role=button", "nth=0",
+  ];
+  for (const sel of refused) {
+    test(`a selector the service never writes is refused: ${sel}`, () => {
+      expect(validateReplacement(`page.locator(${JSON.stringify(sel)})`, O)).toBeNull();
+      expect(validateReplacement(`page.locator('a', { hasText: ${JSON.stringify(sel)} })`, O)).toBeNull(); // an options object is checked too
+      expect(buildLocator({ locator: () => ({}) }, `page.locator(${JSON.stringify(sel)})`)).toBeNull();
+    });
+  }
+  test("the forms the service writes stay", () => {
+    for (const ok of ["#user-name", "[data-qa='order-row-1']", 'input[data-pref="newsletter"]', "tr[data-qa=row-9]", "button.primary", "[id=\"a:b\"]"]) {
+      expect(validateReplacement(`page.locator(${JSON.stringify(ok)})`, O), ok).not.toBeNull();
+    }
+    expect(validateReplacement("page.locator('[data-qa=row-1]').locator('[data-qa=status]')", O)).not.toBeNull();
+    expect(validateReplacement("page.getByText('Save', { exact: true })", O)).not.toBeNull();
+  });
+  test("a candidate that is not the expected element reports a coarse count and a hit ref only when the ref is one the service was sent", async () => {
+    const svc = new FakeService([reply("try", candidate(root)), reply("needs_human", null, { reason: "x" })]);
+    const live = new FakeLive({ [TO]: [1, "e5"] }, "en", [{ ref: "e0", tag: "input" }]);
+    await healer(root, svc, new Verify(), live).heal(failureFor(root));
+    expect(svc.posts("/result")[0]).toEqual({ count: 1, hit: { ref: "e5" } }); // e5 came from the inventory the live page numbered
+    const svc2 = new FakeService([reply("try", candidate(root)), reply("needs_human", null, { reason: "x" })]);
+    await healer(root, svc2, new Verify(), new FakeLive({ [TO]: [9, null] })).heal(failureFor(root));
+    expect(svc2.posts("/result")[0]).toEqual({ count: 2 });
+  });
+  test("a branch candidate is checked in the branch the page's html:lang() gives, not the browser locale", async () => {
+    const br = { en: "this.page.getByLabel('Username')", fr: "this.page.getByLabel('Nom')" };
+    const to = `byLanguage(this.page, { en: ${br.en}, fr: ${br.fr} })`;
+    const cand = candidate(root, { to, branches: br });
+    const svc = new FakeService([reply("try", cand), reply("needs_human", null, { reason: "x" })]);
+    const live = Object.assign(new FakeLive({}, "en"), { branchKey: async (keys: string[]) => (keys.includes("fr") ? "fr" : keys[0]) });
+    await healer(root, svc, new Verify(), live).heal(failureFor(root));
+    expect(live.asked).toEqual([br.fr]); // the page language reads "en"; the runtime would pick fr
   });
 });

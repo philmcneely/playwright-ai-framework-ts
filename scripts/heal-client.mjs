@@ -595,27 +595,33 @@ const COUNT_TIMEOUT_MS = 5000;
 const SECRET_WORDS = ["pass", "pwd", "token", "secret", "ssn", "card", "cvv", "otp"]; // matched in a name or id, any case
 const PASSWORD = [
   'input[type="password" i]', 'input[autocomplete^="cc-" i]', 'input[autocomplete="one-time-code" i]',
-  'input[autocomplete*="password" i]', "[data-heal-was-password]",
+  'input[autocomplete*="password" i]',
   ...SECRET_WORDS.flatMap((w) => ["name", "id"].flatMap((a) => [`input[${a}*="${w}" i]`, `textarea[${a}*="${w}" i]`])),
 ];
-// Marks every input that is, or ever becomes, type=password (a show-password toggle makes it type=text). Runs in the page before
-// its own scripts; the attribute name holds "password", so the inventory filter drops it.
+// Remembers every input that is, or ever becomes, type=password (a show-password toggle makes it type=text). The memory is a WeakSet in
+// the page's own closure, reachable only through a non-configurable Symbol function: NO attribute is set on the DOM while the probe,
+// the aria snapshot or a candidate check runs. `markMasked()` (called only around the screenshot) sets data-heal-mask on them.
 const WAS_PASSWORD = `(() => {
+  const was = new WeakSet();
   const nativeSet = Element.prototype.setAttribute;
-  const mark = (el) => nativeSet.call(el, "data-heal-was-password", "1");
   const isPw = (el) => el instanceof HTMLInputElement && el.type === "password";
-  // a toggle sets the type to text: the type it is leaving is what is remembered
+  const note = (el) => was.add(el);
   const d = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "type");
   Object.defineProperty(HTMLInputElement.prototype, "type", { configurable: true, enumerable: d.enumerable, get: d.get,
-    set(v) { if (isPw(this) || String(v).toLowerCase() === "password") mark(this); d.set.call(this, v); } });
+    set(v) { if (isPw(this) || String(v).toLowerCase() === "password") note(this); d.set.call(this, v); } });
   Element.prototype.setAttribute = function (name, value) {
-    if (this instanceof HTMLInputElement && String(name).toLowerCase() === "type" && (isPw(this) || String(value).toLowerCase() === "password")) mark(this);
+    if (this instanceof HTMLInputElement && String(name).toLowerCase() === "type" && (isPw(this) || String(value).toLowerCase() === "password")) note(this);
     return nativeSet.call(this, name, value);
   };
-  const scan = (root) => { if (root.querySelectorAll) { if (isPw(root)) mark(root); root.querySelectorAll("input").forEach((i) => isPw(i) && mark(i)); } };
-  new MutationObserver((records) => { for (const r of records) { if (r.type === "attributes") isPw(r.target) && mark(r.target); else r.addedNodes.forEach(scan); } })
+  const scan = (root) => { if (root.querySelectorAll) { if (isPw(root)) note(root); root.querySelectorAll("input").forEach((i) => isPw(i) && note(i)); } };
+  new MutationObserver((records) => { for (const r of records) { if (r.type === "attributes") isPw(r.target) && note(r.target); else r.addedNodes.forEach(scan); } })
     .observe(document, { attributes: true, attributeFilter: ["type"], childList: true, subtree: true });
   document.addEventListener("DOMContentLoaded", () => scan(document));
+  const marks = (root, out) => { root.querySelectorAll("input").forEach((i) => { if (isPw(i) || was.has(i)) out.push(i); });
+    root.querySelectorAll("*").forEach((e) => e.shadowRoot && marks(e.shadowRoot, out)); return out; };
+  Object.defineProperty(window, Symbol.for("heal.markMasked"), { configurable: false, enumerable: false, value: (on) => {
+    for (const el of marks(document, [])) on ? nativeSet.call(el, "data-heal-mask", "1") : el.removeAttribute("data-heal-mask");
+  } });
 })();`;
 
 /** A fresh Chromium on the failing route (HEAL_STORAGE_STATE when set). It stays open for the whole heal so each candidate
@@ -684,11 +690,19 @@ export class LivePage {
     this.language = pageLanguage(meta.lang, meta.browser_lang, header);
     let aria = null;
     try {
-      // what a person typed into an editable region is page text in the snapshot: empty those regions in this throwaway page
-      await this.page.evaluate(() => {
-        // eslint-disable-next-line no-undef -- runs in the page
-        for (const el of document.querySelectorAll("[contenteditable]:not([contenteditable=false i])")) el.textContent = "";
-      });
+      // what a person typed into an editable region is page text in the snapshot: empty those regions, in every frame and open shadow
+      // root, in this throwaway page
+      for (const frame of this.page.frames?.() ?? [this.page]) {
+        await frame.evaluate(() => {
+          /* eslint-disable no-undef -- runs in the page */
+          const clear = (root) => {
+            for (const el of root.querySelectorAll("[contenteditable]:not([contenteditable=false i])")) el.textContent = "";
+            for (const el of root.querySelectorAll("*")) if (el.shadowRoot) clear(el.shadowRoot);
+          };
+          clear(document);
+          /* eslint-enable no-undef */
+        }).catch(() => undefined);
+      }
       aria = redactTypedValues(await this.guard.active(() => this.page.locator("body").ariaSnapshot()));
     } catch {
       /* no snapshot */
@@ -721,17 +735,34 @@ export class LivePage {
   async screenshot() {
     try {
       const frames = this.page.frames?.() ?? [this.page];
-      // every cross-origin iframe is covered whole: its content is not ours to send
+      await this.page.waitForLoadState?.("load").catch(() => undefined); // a frame still loading has no url to judge yet
       const here = originOf(this.page.url?.() ?? "");
-      for (const f of frames) {
-        if (f === this.page.mainFrame?.() || originOf(f.url()) === here) continue;
-        await (await f.frameElement()).evaluate((el) => el.setAttribute("data-heal-mask", "1"));
+      // Frames are judged LIVE, by where they are now (a same-origin src that redirected, or a frame a script navigated, is where it
+      // ended up), not by their src attribute. A frame on another origin, one whose url cannot be read, and a sandboxed frame are
+      // covered whole. The marker is on the page only from here to the screenshot.
+      const marked = [];
+      let buf;
+      try {
+        for (const f of frames) {
+          if (f === this.page.mainFrame?.()) continue;
+          const there = originOf(f.url());
+          const el = await f.frameElement();
+          const sandboxed = await el.evaluate((e) => e.hasAttribute("sandbox"));
+          if (!there || there !== here || sandboxed) {
+            await el.evaluate((e) => e.setAttribute("data-heal-mask", "1"));
+            marked.push(el);
+          }
+        }
+        for (const f of frames) await f.evaluate(() => window[Symbol.for("heal.markMasked")]?.(true)); // eslint-disable-line no-undef -- in the page
+        const selectors = [...PASSWORD, "[data-heal-mask]", ...this.settings.mask];
+        const mask = frames.flatMap((f) => selectors.map((sel) => f.locator(sel)));
+        buf = await this.guard.active(() => this.page.screenshot({
+          type: "png", fullPage: false, mask, animations: "disabled", caret: "initial", scale: "css",
+        }));
+      } finally {
+        for (const el of marked) await el.evaluate((e) => e.removeAttribute("data-heal-mask")).catch(() => undefined);
+        for (const f of frames) await f.evaluate(() => window[Symbol.for("heal.markMasked")]?.(false)).catch(() => undefined); // eslint-disable-line no-undef -- in the page
       }
-      const selectors = [...PASSWORD, "[data-heal-mask]", ...this.settings.mask];
-      const mask = frames.flatMap((f) => selectors.map((s) => f.locator(s)));
-      const buf = await this.guard.active(() => this.page.screenshot({
-        type: "png", fullPage: false, mask, animations: "disabled", caret: "initial", scale: "css",
-      }));
       const size = pngSize(buf);
       if (size === null || buf.length > MAX_IMAGE_BYTES) throw new Error("the screenshot is not a usable PNG");
       return { media_type: "image/png", data: buf.toString("base64"), ...size };
@@ -743,6 +774,16 @@ export class LivePage {
 
   /** [match count, inventory ref of the one element hit]. The ref is null unless the count is 1 and the element can be
    * named; the count is null when the expression cannot be run here. */
+  /** Which branch of `keys` (in the order written, the first being the original copy) the page shows, chosen the way the runtime helper
+   * (utils/heal-locale.ts) chooses: the first branch unless the document's `html:lang(<key>)` matches another key. The browser locale
+   * plays no part. */
+  async branchKey(keys) {
+    for (const key of keys.slice(1)) {
+      if (/^[a-z]{2,3}$/.test(key) && (await this.page.locator(`html:lang(${key})`).count()) > 0) return key;
+    }
+    return keys[0];
+  }
+
   async check(expression) {
     const loc = buildLocator(this.page, expression);
     if (loc === null) return [null, null];
@@ -878,6 +919,7 @@ export class Healer {
     const cand = checkedCandidate(resp);
     const healId = resp.heal_id;
     const expected = cand.expect?.ref;
+    if (cand.branches && Object.keys(cand.branches).length) language = await this.branchLanguage(live, cand.branches, language);
     const expression = expressionFor(cand, language);
     const plain = !cand.branches || !Object.keys(cand.branches).length;
     if (expression === null) return [await this.report(healId, { count: null, error: "no branch for the page's language" }), []];
@@ -927,6 +969,11 @@ export class Healer {
     if (passed && next.status === "healed") return [next, planned];
     if (passed) revertFiles(this.root, planned, this.writeFile); // the service did not confirm it: do not keep it
     return [next, []];
+  }
+
+  /** The branch the page shows, as the runtime picks it (see LivePage.branchKey); a stand-in page without it keeps its language. */
+  async branchLanguage(live, branches, fallback) {
+    return typeof live.branchKey === "function" ? live.branchKey(Object.keys(branches)) : fallback;
   }
 
   /** Every locator the candidate writes (each language branch separately) passes the independent second validator. */

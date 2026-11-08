@@ -21,7 +21,8 @@
  *       exactly one node (a span inside a string or a comment, or one that cuts a node in half, is not a node)
  *     - importsHelper / withHelperImport: a real `import { byLanguage }` statement is found in the tree (a comment or a
  *       string that says so does not count) and added after the last import when it is missing
- *     - probingSelector: selectors that read a value back (prefix/suffix/substring operators, `value`, `:has-text`, hidden inputs) are refused
+ *     - probingSelector: other engines, `>>` chains, xpath, backslashes, comments and value-reading operators in a locator() selector are
+ *       refused; regex arguments are refused outright
  *     - toUtf16Index: the service counts spans in code points; JavaScript strings count UTF-16 units
  *     - awaitAllowedAt: whether an `await` may be written where a patch goes (async function or module top level)
  *
@@ -107,20 +108,8 @@ function parseSingle(text) {
 // ---- literals and canonical form -----------------------------------------------------------------------------------------
 class NotLiteral extends Error {}
 
-// A regex that can backtrack for ever on a page's text: a group that holds a quantifier and is itself quantified, or one that is
-// alternation under a quantifier. Refused outright, as is anything long.
-const NESTED_QUANTIFIER = /\((?:[^()\\]|\\.)*(?:[+*]|\{\d)(?:[^()\\]|\\.)*\)[+*{]|\((?:[^()\\]|\\.)*\|(?:[^()\\]|\\.)*\)[+*{]/;
-
-function regexOf(node) {
-  const text = node.text;
-  if (text.length > 200 || NESTED_QUANTIFIER.test(text)) throw new NotLiteral("regex");
-  const slash = text.lastIndexOf("/");
-  try {
-    return new RegExp(text.slice(1, slash), text.slice(slash + 1));
-  } catch {
-    throw new NotLiteral("regex");
-  }
-}
+// A regex argument is refused outright (a pattern can be used to read page text back and can backtrack for ever): the service
+// writes copy as exact strings and never writes a regex.
 
 const keyName = (name) =>
   ts.isIdentifier(name) || ts.isStringLiteral(name) || ts.isNumericLiteral(name) ? name.text : null;
@@ -133,7 +122,7 @@ function literalOf(node, flat = false) {
     case K.TrueKeyword: return true;
     case K.FalseKeyword: return false;
     case K.NullKeyword: return null;
-    case K.RegularExpressionLiteral: return regexOf(node);
+    case K.RegularExpressionLiteral: throw new NotLiteral("regex");
     case K.PrefixUnaryExpression:
       if (node.operator === K.MinusToken && ts.isNumericLiteral(node.operand)) return -Number(node.operand.text);
       throw new NotLiteral("unary");
@@ -151,12 +140,26 @@ function literalOf(node, flat = false) {
   }
 }
 
-// A selector that reads a value back one character at a time (prefix, suffix, substring, word or dash matches, or any selector on
-// a `value` attribute), or that probes text or hidden inputs. `[attr=value]` with plain `=` stays: the service writes it.
-const PROBING_SELECTOR = /\[\s*[^\]=\s]+\s*[\^*$~|]=|\[\s*value\s*[\^*$~|]?=|:has-text|:text|:nth-match|text\s*=\s*\/|\btype\s*=\s*["']?hidden/i;
+// A selector the client will not run. The service writes plain CSS only (`#id`, `[attr=value]`, `tag[data-x="y"]`, a row scope then a
+// child): never another engine (`xpath=`, `css=`, `text=`, `internal:`), a `>>` chain, an xpath, a backslash escape (CSS escapes
+// such as `[\76 alue=x]` spell a banned name), a comment, or an operator that reads a value back one character at a time
+// (prefix, suffix, substring, word or dash match, any selector on `value`, `:has-text`, hidden inputs).
+const PROBING_SELECTOR = new RegExp([
+  String.raw`\[\s*[^\]=\s]+\s*[\^*$~|]=`, String.raw`\[\s*value\s*[\^*$~|]?=`, ":has-text", ":text", ":nth-match", String.raw`\btype\s*=\s*["']?hidden`,
+  String.raw`>>`, "internal:", String.raw`\\`, String.raw`/\*`, String.raw`^\s*[A-Za-z][\w-]*\s*=`, String.raw`^\s*\(?\s*(?:\/\/|\.\.)`,
+].join("|"), "i");
 
-/** True when a locator() selector string may be used to probe page data rather than to find an element. */
+/** True when a locator() selector string is one the client will not run (see above). */
 export const probingSelector = (text) => typeof text === "string" && PROBING_SELECTOR.test(text);
+
+/** Every string inside a call argument: the string itself, or the string values of an options object. */
+function stringsOf(node) {
+  if (ts.isStringLiteral(node)) return [node.text];
+  if (ts.isObjectLiteralExpression(node)) return node.properties.flatMap((p) => (ts.isPropertyAssignment(p) ? stringsOf(p.initializer) : []));
+  return [];
+}
+
+const unsafeValue = (v) => (typeof v === "string" ? probingSelector(v) : v && typeof v === "object" ? Object.values(v).some(unsafeValue) : false);
 
 const isLiteral = (node) => {
   try {
@@ -232,7 +235,7 @@ function chainReceiver(expr) {
         !ts.isIdentifier(callee.name) || !ALLOWED_LOCATOR_METHODS.has(callee.name.text) || !node.arguments.every(isLiteral)) {
       return null;
     }
-    if (callee.name.text === "locator" && node.arguments.some((a) => ts.isStringLiteral(a) && probingSelector(a.text))) return null;
+    if (callee.name.text === "locator" && node.arguments.some((a) => stringsOf(a).some(probingSelector))) return null;
     first = callee.name.text;
     node = callee.expression;
   }
@@ -340,7 +343,7 @@ export function buildLocator(page, expression) {
         throw new NotLiteral("unsupported call");
       }
       const args = node.arguments.map((a) => literalOf(a));
-      if (callee.name.text === "locator" && probingSelector(args[0])) throw new NotLiteral("probing selector");
+      if (callee.name.text === "locator" && args.some(unsafeValue)) throw new NotLiteral("unsafe selector");
       const receiver = walk(callee.expression);
       if (typeof receiver?.[callee.name.text] !== "function") throw new NotLiteral("no such method");
       return receiver[callee.name.text](...args);

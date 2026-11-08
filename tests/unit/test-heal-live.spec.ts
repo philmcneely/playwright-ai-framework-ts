@@ -14,6 +14,7 @@ import type { AddressInfo } from "node:net";
 import { PNG } from "pngjs";
 import { LivePage, buildRequest, settingsFromEnv } from "../../scripts/heal-client.mjs";
 import { vendoredProbe } from "../../scripts/heal-probe.mjs";
+import { byLanguage } from "../../utils/heal-locale.js";
 import { makeProject } from "./heal-helpers.js";
 
 const PAGE = `<!doctype html><html lang="fr"><head><title>Compte</title><style>
@@ -31,7 +32,7 @@ function serve(body: string, headers: Record<string, string> = {}): Promise<{ se
   return new Promise((resolve) => {
     const server = createServer((req, res) => {
       res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", ...headers });
-      res.end(req.url === "/other" ? "other" : body);
+      res.end(req.url === "/other" ? "other" : req.url === "/frame" ? "<html><body style=\"background:#fff\">inner</body></html>" : body);
     });
     server.listen(0, "127.0.0.1", () => resolve({ server, url: `http://127.0.0.1:${(server.address() as AddressInfo).port}` }));
   });
@@ -264,6 +265,94 @@ test.describe("screenshot masks by default", { tag: ["@unit", "@security", "@reg
       expect(ref).toBe(live.inventory.find((i: { testid?: string }) => i.testid === "save-btn")?.ref);
     } finally {
       await live.close();
+    }
+  });
+});
+
+// ---- the third review: frames judged live, no marker on the page, editable text in frames and shadow roots, the branch the runtime picks
+test.describe("third review", { tag: ["@unit", "@security", "@regression"] }, () => {
+  const html = (body: string) => `<!doctype html><html lang="en"><head><style>body{margin:0;background:#fff}
+    iframe{position:absolute;left:10px;width:200px;height:40px;border:0;background:#00aa00}
+    #same{top:10px}#cross{top:60px}#redir{top:110px}#script{top:160px}#sand{top:210px}#plain{top:260px;background:#0000cc}</style></head><body>${body}</body></html>`;
+
+  test("a frame is judged by where it is now: cross-origin, redirected, script-navigated and sandboxed frames are covered, a same-origin one is not", async () => {
+    const page = await serve(html(`
+      <iframe id="same" src="/frame"></iframe>
+      <iframe id="cross" src="${foreign.url}/frame"></iframe>
+      <iframe id="redir" src="/redirect-to-foreign"></iframe>
+      <iframe id="script" src="/frame"></iframe>
+      <iframe id="sand" sandbox="allow-scripts" src="/frame"></iframe>`));
+    const live = await LivePage.open(settingsFromEnv({ BASE_URL: page.url, HEAL_VISION: "on", HEAL_ALLOW_ORIGINS: foreign.url }), "/", vendoredProbe());
+    try {
+      await live.page.route("**/redirect-to-foreign", (r: { fulfill(o: unknown): Promise<void> }) => r.fulfill({ status: 302, headers: { location: `${foreign.url}/frame` } }));
+      await live.page.reload();
+      await live.page.evaluate((u: string) => { (document.getElementById("script") as HTMLIFrameElement).src = u; }, `${foreign.url}/other`);
+      await live.page.waitForTimeout(600);
+      const snap = await live.snapshot();
+      const png = PNG.sync.read(Buffer.from(snap.screenshot.data, "base64"));
+      const px = (y: number) => [...png.data.subarray((y * png.width + 100) * 4, (y * png.width + 100) * 4 + 3)];
+      for (const [name, y, covered] of [["same", 30, false], ["cross", 80, true], ["redir", 130, true], ["script", 180, true], ["sand", 230, true]] as const) {
+        expect(px(y), name).toEqual(covered ? [255, 0, 255] : [255, 255, 255]);
+      }
+    } finally {
+      await live.close();
+      page.server.close();
+    }
+  });
+
+  test("no heal marker is on the page after a vision capture, and a re-probe lists none", async () => {
+    const page = await serve(html(`<input type="password" id="pw" value="x"><input id="tog" type="password" value="y"><script>document.getElementById("tog").type = "text"</script>
+      <iframe id="cross" src="${foreign.url}/frame"></iframe>`));
+    const live = await LivePage.open(settingsFromEnv({ BASE_URL: page.url, HEAL_VISION: "on", HEAL_ALLOW_ORIGINS: foreign.url }), "/", vendoredProbe());
+    try {
+      await live.page.waitForTimeout(300);
+      const first = await live.snapshot();
+      expect(first.screenshot).not.toBeNull();
+      const attrs = async () => live.page.evaluate(() => [...document.querySelectorAll("*")].flatMap((e) => e.getAttributeNames().filter((n) => n.includes("heal"))));
+      expect(await attrs()).toEqual([]);
+      const second = await live.snapshot(); // a re-probe after the capture
+      for (const snap of [first, second]) {
+        expect(JSON.stringify(snap.inventory)).not.toMatch(/heal/i);
+        expect(snap.aria ?? "").not.toMatch(/heal/i);
+      }
+    } finally {
+      await live.close();
+      page.server.close();
+    }
+  });
+
+  test("editable text is emptied in a same-origin frame and in an open shadow root too", async () => {
+    const page = await serve(`<html lang="en"><body><div contenteditable aria-label="Top">TOP-SECRET</div>
+      <iframe srcdoc='<div contenteditable aria-label="Inner">FRAME-SECRET</div>'></iframe>
+      <div id="host"></div><script>document.getElementById("host").attachShadow({mode:"open"}).innerHTML = '<div contenteditable aria-label="Shadow">SHADOW-SECRET</div>'</script></body></html>`);
+    const live = await LivePage.open(settingsFromEnv({ BASE_URL: page.url }), "/", vendoredProbe());
+    try {
+      await live.page.waitForTimeout(300);
+      const snap = await live.snapshot();
+      expect(JSON.stringify(snap)).not.toMatch(/TOP-SECRET|FRAME-SECRET|SHADOW-SECRET/);
+    } finally {
+      await live.close();
+      page.server.close();
+    }
+  });
+
+  test("the language a branch check uses is the one html:lang() gives, as at runtime, never the browser locale", async () => {
+    const page = await serve('<html><body><p id="a">FR</p><p id="b">EN</p></body></html>'); // no <html lang>
+    const live = await LivePage.open(settingsFromEnv({ BASE_URL: page.url }), "/", vendoredProbe());
+    try {
+      expect(await live.branchKey(["fr", "en"])).toBe("fr"); // nothing matches: the first branch
+      expect(await byLanguage(live.page, { fr: live.page.locator("#a"), en: live.page.locator("#b") }).textContent()).toBe("FR"); // what runs
+      await live.page.evaluate(() => document.documentElement.setAttribute("lang", "fr-CA"));
+      expect(await live.branchKey(["en", "fr"])).toBe("fr");
+      expect(await live.branchKey(["fr", "en"])).toBe("fr"); // the first is the default either way
+      await live.page.evaluate(() => document.documentElement.setAttribute("lang", "en"));
+      expect(await live.branchKey(["fr", "en"])).toBe("en");
+      expect(await live.branchKey(["fr", "en", "de"])).toBe("en");
+      await live.page.evaluate(() => document.documentElement.setAttribute("lang", "de"));
+      expect(await live.branchKey(["en", "fr"])).toBe("en");
+    } finally {
+      await live.close();
+      page.server.close();
     }
   });
 });
