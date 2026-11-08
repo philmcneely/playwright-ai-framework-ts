@@ -155,7 +155,8 @@ export class ServiceClient {
       });
       text = await resp.text();
     } catch (e) {
-      throw new HealServiceError(`the heal service could not be reached (${e?.name ?? "Error"})`);
+      // the name, and the system error code under it when there is one (ECONNRESET, ECONNREFUSED, ...): never the request
+      throw new HealServiceError(`the heal service could not be reached (${e?.name ?? "Error"}${e?.cause?.code ? `, ${String(e.cause.code).slice(0, 40)}` : ""})`);
     }
     if (resp.status >= 400) {
       let detail = null;

@@ -364,3 +364,27 @@ test.describe("the inventory keeps every fact the service reads", { tag: ["@unit
     expect(Object.keys(cleanInventory([full])[0]).sort()).toEqual(probeKeys.sort());
   });
 });
+
+test.describe("the selector and regex refusals are for what the service writes, not for the code being replaced", { tag: ["@unit", "@regression"] }, () => {
+  const NEW = "page.getByText('Cobalt Inc', { exact: true })";
+  const originals = [
+    "page.locator('//table//tr[3]/td[2]')", "page.locator('css=a >> text=Go')", "page.locator('[data-x=\"a\\\\:b\"]')", "page.locator('a /* c */')",
+    "page.getByRole('button', { name: /^Save( changes)?$/i })", "page.getByText(/(a+)+$/)", "page.locator('input[value^=\"k\"]')",
+    "page.locator('//div[@id=\"app\"]/div[1]')",
+  ];
+  originals.forEach((orig, i) => {
+    test(`an original that was written by a person is replaced (${i + 1}): ${orig.slice(0, 48)}`, () => {
+      expect(checkReplacement(NEW, orig)).toBeNull();
+    });
+  });
+  test("the replacement is still held to the strict rules, whatever the original is", () => {
+    for (const bad of ["page.locator('//td')", "page.getByText(/x/)", "page.locator('a >> b')", "page.locator('[value^=k]')"]) {
+      expect(checkReplacement(bad, "page.locator('//table//tr[3]/td[2]')"), bad).not.toBeNull();
+    }
+  });
+  test("an original that is not a locator chain is still refused", () => {
+    expect(checkReplacement(NEW, "page.locator('//td').click()")).not.toBeNull();
+    expect(checkReplacement(NEW, "page.locator(x)")).not.toBeNull();
+    expect(checkReplacement(NEW, "other.locator('//td')")).toBe("the replacement is not a safe locator expression"); // another receiver
+  });
+});

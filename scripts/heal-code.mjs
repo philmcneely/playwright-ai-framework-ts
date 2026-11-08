@@ -115,14 +115,16 @@ const keyName = (name) =>
   ts.isIdentifier(name) || ts.isStringLiteral(name) || ts.isNumericLiteral(name) ? name.text : null;
 
 /** The JavaScript value of a literal argument; throws NotLiteral for anything else. `flat` forbids nested objects. */
-function literalOf(node, flat = false) {
+function literalOf(node, flat = false, regexOk = false) {
   switch (node.kind) {
     case K.StringLiteral: return node.text;
     case K.NumericLiteral: return Number(node.text);
     case K.TrueKeyword: return true;
     case K.FalseKeyword: return false;
     case K.NullKeyword: return null;
-    case K.RegularExpressionLiteral: throw new NotLiteral("regex");
+    case K.RegularExpressionLiteral:
+      if (regexOk) return regexOf(node); // only in code being replaced: a person wrote it, nothing here runs it
+      throw new NotLiteral("regex");
     case K.PrefixUnaryExpression:
       if (node.operator === K.MinusToken && ts.isNumericLiteral(node.operand)) return -Number(node.operand.text);
       throw new NotLiteral("unary");
@@ -132,7 +134,7 @@ function literalOf(node, flat = false) {
       for (const prop of node.properties) {
         const name = ts.isPropertyAssignment(prop) ? keyName(prop.name) : null;
         if (name === null || name === "__proto__" || Object.hasOwn(out, name)) throw new NotLiteral("property");
-        out[name] = literalOf(prop.initializer, true);
+        out[name] = literalOf(prop.initializer, true, regexOk);
       }
       return out;
     }
@@ -161,9 +163,19 @@ function stringsOf(node) {
 
 const unsafeValue = (v) => (typeof v === "string" ? probingSelector(v) : v && typeof v === "object" ? Object.values(v).some(unsafeValue) : false);
 
-const isLiteral = (node) => {
+function regexOf(node) {
+  const text = node.text;
+  const slash = text.lastIndexOf("/");
   try {
-    literalOf(node);
+    return new RegExp(text.slice(1, slash), text.slice(slash + 1));
+  } catch {
+    throw new NotLiteral("regex");
+  }
+}
+
+const isLiteral = (node, regexOk = false) => {
+  try {
+    literalOf(node, false, regexOk);
     return true;
   } catch {
     return false;
@@ -226,16 +238,17 @@ const isThisPage = (n) => ts.isPropertyAccessExpression(n) && n.expression.kind 
   !n.questionDotToken;
 
 /** The receiver text of a pure locator chain (`page`, `this.page` or another bare name), or null when `expr` is not one. */
-function chainReceiver(expr) {
+function chainReceiver(expr, strict = true) {
   let node = expr;
   let first = null;
   while (ts.isCallExpression(node)) {
     const callee = node.expression;
     if (node.questionDotToken || node.typeArguments || !ts.isPropertyAccessExpression(callee) || callee.questionDotToken ||
-        !ts.isIdentifier(callee.name) || !ALLOWED_LOCATOR_METHODS.has(callee.name.text) || !node.arguments.every(isLiteral)) {
+        !ts.isIdentifier(callee.name) || !ALLOWED_LOCATOR_METHODS.has(callee.name.text) || !node.arguments.every((a) => isLiteral(a, !strict))) {
       return null;
     }
-    if (callee.name.text === "locator" && node.arguments.some((a) => stringsOf(a).some(probingSelector))) return null;
+    // the selector rules are for what the service WRITES; the code being replaced was written by a person (xpath, regex and all)
+    if (strict && callee.name.text === "locator" && node.arguments.some((a) => stringsOf(a).some(probingSelector))) return null;
     first = callee.name.text;
     node = callee.expression;
   }
@@ -255,13 +268,20 @@ export function validateReplacement(proposed, original) {
   const o = parseExpression(original);
   if (!o) return null;
   const receiver = chainReceiver(p.expr);
-  return receiver !== null && receiver === chainReceiver(o.expr) ? proposed : null;
+  return receiver !== null && receiver === chainReceiver(o.expr, false) ? proposed : null;
 }
 
 /** The object the first locator method of `expr` is called on (`this.page`), or null. */
 export function receiverText(expr) {
   const parsed = parseExpression(expr);
-  return parsed ? chainReceiver(parsed.expr) : null;
+  return parsed ? chainReceiver(parsed.expr, false) : null;
+}
+
+/** True when `original` (the code being replaced) is one clean line that is a chain of locator calls with literal arguments. A person
+ * wrote it, so an xpath, a regex or a `>>` chain in it is fine; only the shape is checked. */
+export function isReplaceable(original) {
+  const p = parseSingle(original);
+  return p !== null && chainReceiver(p.expr, false) !== null;
 }
 
 /** {receiver, branches: {language: normalized code}, texts: {language: code as written}} when `code` is
@@ -299,7 +319,7 @@ export function branchDict(code) {
  * branch must pass validateReplacement on its own.
  */
 export function checkReplacement(to, original, branches = null, exactBranches = true) {
-  if (validateReplacement(original, original) === null) return "the expression to replace is not a plain locator chain";
+  if (!isReplaceable(original)) return "the expression to replace is not a plain locator chain";
   if (to === original) return "the replacement is identical to the failing locator";
   if (!isSingleExpression(to)) {
     return "the replacement is not a single clean expression (no comment, control character or second statement)";

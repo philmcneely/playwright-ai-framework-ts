@@ -24,3 +24,4 @@ export function helperImportLine(file: string): string;
 export function withHelperImport(source: string, file: string): string;
 export function awaitAllowedAt(text: string, file: string, start: number, end: number): boolean;
 export function probingSelector(text: unknown): boolean;
+export function isReplaceable(original: unknown): boolean;
