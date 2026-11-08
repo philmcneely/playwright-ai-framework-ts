@@ -349,3 +349,18 @@ test.describe("N1 oracle: engines, escapes, comments and what is reported", { ta
     expect(live.asked).toEqual([br.fr]); // the page language reads "en"; the runtime would pick fr
   });
 });
+
+test.describe("the inventory keeps every fact the service reads", { tag: ["@unit", "@regression"] }, () => {
+  test("pw_text, pw_cut, top_at_center and row_attr survive the allowlist: without them the service cannot prove a text locator unique or an element clickable", () => {
+    const item = { tag: "td", text: "Echo", pw_text: "Echo GmbH paid", pw_cut: false, top_at_center: true, row: "order-row-1", row_attr: "data-qa", value: "x" };
+    expect(cleanInventory([item])[0]).toEqual({ tag: "td", text: "Echo", pw_text: "Echo GmbH paid", pw_cut: false, top_at_center: true, row: "order-row-1", row_attr: "data-qa" });
+  });
+  test("they are still plain values: a non-string pw_text or a non-boolean flag is dropped", () => {
+    expect(cleanInventory([{ tag: "a", pw_text: { x: 1 }, pw_cut: "yes", top_at_center: 1 }])[0]).toEqual({ tag: "a" });
+  });
+  test("every key the vendored probe lists is sent", () => {
+    const probeKeys = ["tag", "type", "role", "name", "aria_label", "label", "placeholder", "id", "testid", "data_test", "data_qa", "data_cy", "class", "name_attr", "title", "alt", "text", "disabled", "hidden", "box", "row", "row_attr", "frame", "shadow", "top_at_center", "pw_text", "pw_cut"];
+    const full = Object.fromEntries(probeKeys.map((k) => [k, k === "box" ? { x: 1, y: 2, width: 3, height: 4 } : k === "disabled" || k === "hidden" || k === "pw_cut" || k === "top_at_center" ? true : "v"]));
+    expect(Object.keys(cleanInventory([full])[0]).sort()).toEqual(probeKeys.sort());
+  });
+});

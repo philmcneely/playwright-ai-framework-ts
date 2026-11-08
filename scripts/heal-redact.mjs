@@ -30,8 +30,13 @@
 // when the name is not a value, a credential or an address (see DROP_KEY).
 export const INVENTORY_KEYS = new Set([
   "ref", "tag", "type", "role", "name", "aria_label", "label", "placeholder", "id", "testid", "data_test", "data_qa",
-  "data_cy", "class", "name_attr", "title", "alt", "text", "disabled", "hidden", "box", "row", "frame", "shadow",
+  "data_cy", "class", "name_attr", "title", "alt", "text", "disabled", "hidden", "box", "row", "row_attr", "frame", "shadow",
+  // what the service reads to prove a text locator unique (pw_text, pw_cut: the probe's own capped, token-scrubbed copy of the text
+  // Playwright's has_text sees) and an element reachable (top_at_center). Leaving them out made the service refuse to claim
+  // uniqueness, which is most of what `no_candidate_left` and `no_pick` were in the acceptance run.
+  "pw_text", "pw_cut", "top_at_center",
 ]);
+const BOOL_KEYS = new Set(["disabled", "hidden", "pw_cut", "top_at_center"]); // true or false, nothing else
 const DATA_KEY = /^data_[a-z0-9_]{1,60}$/;
 const DROP_KEY = /value|token|csrf|auth|session|secret|email|password|cookie|passcode|credential|bearer|api_?key|(^|_)(otp|pin|jwt|ssn|card|cvv|cvc|iban|heal)(_|$)/i; // `heal`: a marker this client sets must never be an inventory key
 const BOX_KEYS = ["x", "y", "width", "height"];
@@ -175,6 +180,7 @@ function cleanItem(item) {
   for (const [key, value] of Object.entries(item)) {
     if (DROP_KEY.test(key)) continue;
     if (!INVENTORY_KEYS.has(key) && !DATA_KEY.test(key)) continue;
+    if (BOOL_KEYS.has(key) && typeof value !== "boolean") continue;
     if (key === "box") {
       if (value && typeof value === "object" && BOX_KEYS.every((k) => isNumber(value[k]))) {
         out[key] = Object.fromEntries(BOX_KEYS.map((k) => [k, value[k]]));
