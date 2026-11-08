@@ -68,7 +68,7 @@ import {
 import {
   callKey, healDir, lastPassFor, lineOf, loadStore, relativeUnder, sourceRoots, stackFrames,
 } from "./heal-fingerprints.mjs";
-import { sha256, vendoredProbe } from "./heal-probe.mjs";
+import { probeFunction, sha256, vendoredProbe } from "./heal-probe.mjs";
 import { cleanInventory, redactTypedValues } from "./heal-redact.mjs";
 
 export { vendoredProbe };
@@ -329,7 +329,8 @@ export function clientVersion(root) {
 /** The POST /v1/heal body. `snap` is a LivePage snapshot: path, language signals, inventory, aria, viewport and, with
  * HEAL_VISION on, the screenshot. No input value is included: the inventory is allowlisted and the aria text redacted. */
 export function buildRequest(failure, files, stack, snap, settings, root, lastPass = null, runId = null) {
-  const screenshot = snap.screenshot ?? null;
+  // with HEAL_VISION off no image leaves the client, whatever a live page handed over
+  const screenshot = settings.vision !== "off" ? snap.screenshot ?? null : null;
   const req = {
     client: { framework: "playwright-ai-framework-ts", language: "typescript", version: clientVersion(root) },
     test: { id: testId(failure, root), title: String(failure.title ?? "").slice(0, 500) },
@@ -552,6 +553,7 @@ export class LivePage {
     this.settings = settings;
     this.route = route || "/";
     this.probe = probe;
+    this.probeFn = probeFunction(probe);
     this.inventory = [];
     this.language = "";
     this.guard = new OriginGuard(settings.baseUrl);
@@ -590,7 +592,7 @@ export class LivePage {
 
   /** Run the probe on the page and read its aria snapshot: path, language signals, numbered inventory, viewport. */
   async snapshot() {
-    const data = (await this.guard.active(() => this.page.evaluate(this.probe))) ?? {};
+    const data = (await this.guard.active(() => this.page.evaluate(this.probeFn))) ?? {};
     const meta = data.page ?? {};
     let header = null;
     try {
@@ -647,7 +649,7 @@ export class LivePage {
     if (loc === null) return [null, null];
     const count = await loc.count();
     if (count !== 1) return [count, null];
-    const data = await this.guard.active(() => loc.evaluate(this.probe));
+    const data = await this.guard.active(() => loc.evaluate(this.probeFn));
     const facts = cleanInventory(data?.items ?? [])[0];
     return [1, facts ? matchRef(this.inventory, facts) : null];
   }

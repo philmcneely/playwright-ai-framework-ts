@@ -1,6 +1,4 @@
 /* eslint-disable @typescript-eslint/no-explicit-any -- the service replies and Playwright pages are dynamic JSON/objects */
-import type { buildLocator, checkReplacement, validateReplacement } from "./heal-code.mjs";
-import type { vendoredProbe } from "./heal-probe.mjs";
 
 export type Env = Record<string, string | undefined>;
 export type Json = Record<string, any>;
@@ -48,7 +46,8 @@ export interface Decision {
 
 export const DEFAULT_BASE_URL: string;
 export const LIMITS: { files: number; fileBytes: number; ariaChars: number };
-export { buildLocator, checkReplacement, validateReplacement, vendoredProbe };
+export { buildLocator, checkReplacement, validateReplacement } from "./heal-code.mjs";
+export { vendoredProbe } from "./heal-probe.mjs";
 
 export function splitSelectors(text: string | undefined): string[];
 export function settingsFromEnv(env?: Env): HealSettings;
@@ -108,6 +107,7 @@ export function pngSize(buf: Buffer): { width: number; height: number } | null;
 export class LivePage {
   constructor(settings: HealSettings, route: string, probe: string);
   static open(settings: HealSettings, route: string, probe: string): Promise<LivePage>;
+  settings: HealSettings;
   guard: OriginGuard;
   inventory: Json[];
   language: string;

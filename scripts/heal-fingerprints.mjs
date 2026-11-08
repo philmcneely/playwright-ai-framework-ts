@@ -39,9 +39,7 @@
  * ===============================================================================
  */
 import { createHash } from "node:crypto";
-import {
-  closeSync, mkdirSync, openSync, readFileSync, realpathSync, renameSync, statSync, unlinkSync, writeFileSync,
-} from "node:fs";
+import fs, { closeSync, mkdirSync, openSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
 export const VERSION = 1;
@@ -84,11 +82,20 @@ const insideDir = (base, target) => {
   return rel === "" || (!rel.startsWith("..") && !path.isAbsolute(rel));
 };
 
+/** The real path of `p` even when it does not exist: the deepest existing ancestor is resolved (symlinks followed) and the
+ * rest is appended, so a path under a symlinked directory (macOS /var -> /private/var) compares equal to its real form. */
 const realOrResolved = (p) => {
-  try {
-    return realpathSync(p);
-  } catch {
-    return path.resolve(p);
+  let current = path.resolve(p);
+  const rest = [];
+  for (;;) {
+    try {
+      return path.join(fs.realpathSync(current), ...rest.reverse());
+    } catch {
+      const parent = path.dirname(current);
+      if (parent === current) return path.resolve(p);
+      rest.push(path.basename(current));
+      current = parent;
+    }
   }
 };
 

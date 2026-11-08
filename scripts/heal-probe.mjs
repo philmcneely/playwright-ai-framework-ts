@@ -13,6 +13,8 @@
  *
  * Features:
  *     - vendoredProbe(): the script text, after its sha256 matches PROBE_SHA256
+ *     - probeFunction(source): the probe as a function object for page.evaluate / locator.evaluate. Playwright for JavaScript
+ *       runs a string as an expression and does NOT call it (the Python client does), so the source is wrapped once here
  *     - sha256(data): the hash used to compare a service's copy with the vendored one
  *
  * Environment Variables:
@@ -50,4 +52,13 @@ export function vendoredProbe() {
     return text;
   }
   throw new Error("scripts/heal-probe.js (the vendored page probe) was not found");
+}
+
+/**
+ * The probe as a function `Playwright` can send to the page: `page.evaluate(fn)` runs it for the whole page and
+ * `locator.evaluate(fn)` runs it on that one element (`only`). The function is only compiled here, never called in Node:
+ * Playwright serializes it with toString() and runs the text in the page, so a page's CSP does not apply.
+ */
+export function probeFunction(source) {
+  return new Function("only", `return (${source})(only);`);
 }
