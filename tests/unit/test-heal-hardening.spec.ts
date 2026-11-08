@@ -388,3 +388,24 @@ test.describe("the selector and regex refusals are for what the service writes, 
     expect(checkReplacement(NEW, "other.locator('//td')")).toBe("the replacement is not a safe locator expression"); // another receiver
   });
 });
+
+test.describe("an original may hold locators as arguments (filter has / hasNot), a replacement may not", { tag: ["@unit", "@regression"] }, () => {
+  const NEW = "page.getByText('Row A', { exact: true })";
+  for (const orig of [
+    "page.locator('mat-menu').filter({ has: page.locator('button', { hasText: 'Open' }) })",
+    "page.locator('.agent-option').filter({ has: page.locator('.agent-option-name', { hasText: 'Atlas' }) }).first()",
+    "page.locator('select').filter({ hasNot: page.getByText('x', { exact: true }) })",
+  ]) {
+    test(`replaceable: ${orig.slice(0, 60)}`, () => {
+      expect(checkReplacement(NEW, orig)).toBeNull();
+    });
+  }
+  test("still not replaceable: an argument that is a call, a function or another receiver", () => {
+    for (const orig of ["page.locator('a').filter({ has: foo() })", "page.locator('a').filter({ has: () => 1 })", "page.locator('a').filter({ has: other.locator('b') })", "page.locator('a').filter({ has: page.locator('b').click() })"]) {
+      expect(checkReplacement(NEW, orig), orig).not.toBeNull();
+    }
+  });
+  test("a replacement with a locator argument is still refused", () => {
+    expect(checkReplacement("page.locator('a').filter({ has: page.locator('b') })", "page.locator('#x')")).not.toBeNull();
+  });
+});

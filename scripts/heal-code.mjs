@@ -238,13 +238,29 @@ const isThisPage = (n) => ts.isPropertyAccessExpression(n) && n.expression.kind 
   !n.questionDotToken;
 
 /** The receiver text of a pure locator chain (`page`, `this.page` or another bare name), or null when `expr` is not one. */
+/** The receiver at the foot of a chain of calls and property accesses, as text (`page`, `this.page`), or null. */
+function rootOf(node) {
+  let n = node;
+  while (ts.isCallExpression(n) || ts.isPropertyAccessExpression(n)) n = ts.isCallExpression(n) ? n.expression : n.expression;
+  return isThisPage(n) ? "this.page" : ts.isIdentifier(n) ? n.text : null;
+}
+
+/** In code being replaced only: an argument that is itself a locator chain on the same receiver, or an options object whose values are
+ * literals or such chains (`filter({ has: page.locator('b') })`). */
+function isLocatorArg(arg, receiver) {
+  if (ts.isCallExpression(arg)) return chainReceiver(arg, false) === receiver;
+  if (!ts.isObjectLiteralExpression(arg)) return false;
+  return arg.properties.every((p) => ts.isPropertyAssignment(p) && keyName(p.name) !== null &&
+    (isLiteral(p.initializer, true) || (ts.isCallExpression(p.initializer) && chainReceiver(p.initializer, false) === receiver)));
+}
+
 function chainReceiver(expr, strict = true) {
   let node = expr;
   let first = null;
   while (ts.isCallExpression(node)) {
     const callee = node.expression;
     if (node.questionDotToken || node.typeArguments || !ts.isPropertyAccessExpression(callee) || callee.questionDotToken ||
-        !ts.isIdentifier(callee.name) || !ALLOWED_LOCATOR_METHODS.has(callee.name.text) || !node.arguments.every((a) => isLiteral(a, !strict))) {
+        !ts.isIdentifier(callee.name) || !ALLOWED_LOCATOR_METHODS.has(callee.name.text) || !node.arguments.every((a) => isLiteral(a, !strict) || (!strict && isLocatorArg(a, rootOf(node))))) {
       return null;
     }
     // the selector rules are for what the service WRITES; the code being replaced was written by a person (xpath, regex and all)
