@@ -1,272 +1,332 @@
 /**
- * heal.mjs — out-of-band locator healer (v2, CLI mode)
+ * ===============================================================================
+ * heal.mjs - out-of-band locator healer (v3, heal-service client)
+ * ===============================================================================
+ * Runs failing Playwright tests, sends each failure's evidence to a heal service, applies the locator patch the service
+ * returns, and re-runs to verify. Heals LOCATORS only - never assertions or test intent. A failure it cannot make pass is
+ * reverted and reported for a human (likely an app bug, not drift).
  *
- * Runs failing Playwright tests, grounds each failure in the page snapshot
- * Playwright captured AT the failure (error-context), asks a configurable model
- * for a resilient semantic locator, applies it to the one exact call that
- * failed, and re-runs to verify. Heals LOCATORS only — never assertions or test
- * intent. The model's output is untrusted: it must be a single Playwright
- * locator call with literal arguments, or it is rejected. Genuine app bugs are
- * left failing and reported for a human, not "healed".
+ * The service owns the model calls and the healing rules: it finds the broken call, picks the element, writes the locator by
+ * the priority rules (test id > id > name > ... > text), adds language branches and decides healed or needs-human. This script
+ * contains no model URL, model name, prompt or reply parsing. What it does (see scripts/heal-client.mjs):
+ *     - runs the suite with the JSON reporter and collects the failures
+ *     - per failure: reopens the failing route, collects the element inventory with the vendored probe script, and sends it
+ *       with the stack files, the language signals, (with HEAL_VISION=auto|on) one masked screenshot and (when recorded) the
+ *       last green run's fingerprint
+ *     - checks each candidate in the live page (exactly one match, the expected element) before editing anything
+ *     - applies a patch only if its hash, path, span and replacement pass the safety checks, then re-runs the exact test and
+ *       keeps the edit only if that test ran and passed and the service confirms
+ *     - prints every decision with its token usage and a run total, writes heal-summary.json, and with --open-pr commits only
+ *       the healed files
  *
- * This is the on-demand half of the overnight heal->PR orchestration: run it in
- * CI/cron after the suite, optionally with --open-pr to raise a single PR with
- * the decisions and the tests it left untouched.
- *
- * Model is provider-agnostic via an OpenAI-compatible endpoint:
- *   HEAL_BASE_URL   e.g. https://openrouter.ai/api/v1 | http://localhost:3025/v1
- *   HEAL_MODEL      e.g. qwen3:8b
- *   HEAL_API_KEY    optional (omit for a local server or keyless gateway)
+ * This is the on-demand half of the overnight heal->PR orchestration: run it in CI/cron after the suite, optionally with
+ * --open-pr to raise a single PR with the decisions and the tests it left untouched.
  *
  * Usage:
- *   BASE_URL=... HEAL_BASE_URL=... HEAL_MODEL=... node scripts/heal.mjs [--grep <name>] [--open-pr] [--max N]
+ *   BASE_URL=... HEAL_SERVICE_URL=http://localhost:8765 [HEAL_SERVICE_TOKEN=...] [HEAL_STORAGE_STATE=auth.json] \
+ *     node scripts/heal.mjs [--grep <name>] [--max N] [--open-pr]
  *
- * --open-pr needs git + the gh CLI and a clean worktree, and commits ONLY the
- * files it healed.
+ * --open-pr needs git + the gh CLI and a clean worktree, and commits ONLY the files it healed.
+ *
+ * Environment Variables:
+ *     HEAL_SERVICE_URL: the heal service (required)
+ *     HEAL_SERVICE_TOKEN: bearer token, when the service needs one
+ *     HEAL_STORAGE_STATE: Playwright storage-state file, so the page is opened as a signed-in user (never sent)
+ *     HEAL_VISION / HEAL_MASK: off (default) | auto | on, and the selectors to mask in the one screenshot
+ *     HEAL_TEST_ID_ATTRIBUTE: the project's test id attribute (default data-testid)
+ *     HEAL_SOURCE_ROOTS: comma separated source roots (default pages,tests,utils,fixtures)
+ *     HEAL_PROJECT: the Playwright project to run and re-run (default chromium; empty runs the config's default)
+ *     HEAL_ARTIFACTS_DIR: where heal-summary.json goes (default test_artifacts)
+ *     BASE_URL: the app under test
+ *
+ * Author: PMAC
+ * ===============================================================================
  */
 import { execFileSync } from "node:child_process";
-import { readFileSync, writeFileSync, mkdtempSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, relative, resolve } from "node:path";
+import path, { join, relative, resolve } from "node:path";
+import { receiverText } from "./heal-code.mjs";
+import { HealServiceError, Healer, ServiceClient, runTotal, settingsFromEnv } from "./heal-client.mjs";
 import { validReplacement } from "./heal-validate.mjs";
 
-const args = process.argv.slice(2);
-const usageError = (msg) => {
-  console.error(`[heal] ${msg}\nUsage: node scripts/heal.mjs [--grep <name>] [--max N] [--open-pr]`);
-  process.exit(2);
-};
-const valueOf = (flag) => {
-  const i = args.indexOf(flag);
-  if (i < 0) return null;
-  const v = args[i + 1];
-  if (v === undefined || v.startsWith("--")) usageError(`${flag} requires a value`);
-  return v;
-};
-const KNOWN = new Set(["--grep", "--max", "--open-pr"]);
-for (const a of args) if (a.startsWith("--") && !KNOWN.has(a)) usageError(`unknown flag ${a}`);
-const GREP = valueOf("--grep");
-const OPEN_PR = args.includes("--open-pr");
-const MAX = valueOf("--max") === null ? 10 : Number(valueOf("--max"));
-if (!Number.isInteger(MAX) || MAX < 1) usageError("--max must be a positive integer");
-
-const HEAL_BASE_URL = process.env.HEAL_BASE_URL;
-const HEAL_MODEL = process.env.HEAL_MODEL;
-const HEAL_API_KEY = process.env.HEAL_API_KEY || "";
-if (!HEAL_BASE_URL || !HEAL_MODEL) {
-  console.error("Set HEAL_BASE_URL and HEAL_MODEL (OpenAI-compatible endpoint + model id).");
-  process.exit(2);
-}
+export { validReplacement };
 
 const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 // eslint-disable-next-line no-control-regex
 const ANSI = /\u001b\[[0-9;]*m/g;
+const HEAL_PAGE_ATTACHMENT = "heal-page-url";
 
-/** Run the suite (optionally grep-filtered) with the JSON reporter and return the parsed report. */
-function runSuite(grep) {
+// ---- running the suite ---------------------------------------------------------------------------------------------------
+/** Run the suite (optionally one file and a title filter) with the JSON reporter. HEAL_RUN is set for the child so the
+ * fingerprint recorder records nothing during a heal. Returns {code, report}; report is null when none was produced. */
+export function runSuite({ grep = null, file = null, env = process.env } = {}) {
   const out = join(mkdtempSync(join(tmpdir(), "heal-")), "report.json");
-  const a = ["playwright", "test", "--project=chromium", "--retries=0", "--reporter=json"];
-  if (grep) a.push("--grep", grep);
+  const args = ["playwright", "test", "--retries=0", "--reporter=json"];
+  const project = env.HEAL_PROJECT ?? "chromium";
+  if (project) args.push(`--project=${project}`);
+  if (file) args.push(escapeRe(file));
+  if (grep) args.push("--grep", grep);
+  let code = 0;
   try {
-    execFileSync("npx", a, { env: { ...process.env, PLAYWRIGHT_JSON_OUTPUT_NAME: out }, stdio: "ignore" });
-  } catch {
-    /* non-zero exit on failures is expected */
+    execFileSync("npx", args, { env: { ...env, PLAYWRIGHT_JSON_OUTPUT_NAME: out, HEAL_RUN: "1" }, stdio: "ignore" });
+  } catch (e) {
+    code = typeof e.status === "number" ? e.status : 1; // a non-zero exit on failures is expected
   }
-  return JSON.parse(readFileSync(out, "utf-8"));
+  try {
+    return { code, report: JSON.parse(readFileSync(out, "utf-8")) };
+  } catch {
+    return { code, report: null };
+  }
 }
 
-/** Flatten the JSON report into the failing tests: error text, source location, failure-time snapshot. */
-function failuresOf(report) {
-  const fails = [];
-  const walk = (suite, file) => {
-    for (const s of suite.suites || []) walk(s, s.file || file);
-    for (const spec of suite.specs || []) {
-      for (const t of spec.tests || []) {
-        const ok = t.results?.every((r) => r.status === "passed" || r.status === "skipped");
-        if (!ok) {
-          const bad = (t.results || []).filter((r) => r.status !== "passed" && r.status !== "skipped");
-          const last = bad[bad.length - 1];
-          const err = bad.map((r) => r.errors?.map((e) => e.message).join("\n")).join("\n").replace(ANSI, "");
-          const ctx = last?.attachments?.find((a) => a.name === "error-context" && a.path);
-          fails.push({
-            title: spec.title,
-            file: spec.file || file,
-            error: err,
-            location: last?.errors?.find((e) => e.location)?.location || null,
-            snapshot: ctx ? readFileSync(ctx.path, "utf-8").slice(0, 12000) : null,
-          });
-        }
+/** The attachment `name` of a JSON-report result as text, or null. */
+function attachmentText(result, name) {
+  const att = (result?.attachments ?? []).find((a) => a.name === name);
+  if (!att) return null;
+  try {
+    return att.body ? Buffer.from(att.body, "base64").toString("utf-8") : att.path ? readFileSync(att.path, "utf-8") : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Every test of the JSON report as {title, file, status, results}, `file` being an absolute path. */
+function* specsOf(report) {
+  const rootDir = report?.config?.rootDir ?? process.cwd();
+  function* walk(suite, file) {
+    for (const s of suite.suites ?? []) yield* walk(s, s.file || file);
+    for (const spec of suite.specs ?? []) {
+      for (const t of spec.tests ?? []) {
+        yield { title: spec.title, file: resolve(rootDir, spec.file || file || ""), test: t };
       }
     }
-  };
-  for (const s of report.suites || []) walk(s, s.file);
+  }
+  for (const s of report?.suites ?? []) yield* walk(s, s.file);
+}
+
+/** Flatten the JSON report into the failing tests: error text, stack text, source location and the page path at the failure. */
+export function failuresOf(report) {
+  const fails = [];
+  for (const { title, file, test: t } of specsOf(report)) {
+    const results = t.results ?? [];
+    if (results.every((r) => r.status === "passed" || r.status === "skipped")) continue;
+    const bad = results.filter((r) => r.status !== "passed" && r.status !== "skipped");
+    const last = bad[bad.length - 1];
+    const errors = bad.flatMap((r) => r.errors ?? []);
+    fails.push({
+      title,
+      file,
+      error: errors.map((e) => e.message ?? "").join("\n").replace(ANSI, ""),
+      stack: errors.map((e) => e.stack ?? "").join("\n").replace(ANSI, ""),
+      location: errors.find((e) => e.location)?.location ?? null,
+      route: attachmentText(last, HEAL_PAGE_ATTACHMENT)?.trim() || null,
+    });
+  }
   return fails;
 }
 
-/** Return the balanced `name(...)` call text starting at `start` (the index of `name`), or null. */
-function balancedCall(src, start) {
-  const open = src.indexOf("(", start);
-  if (open < 0) return null;
-  let depth = 0;
-  for (let i = open; i < src.length; i++) {
-    const c = src[i];
-    if (c === "'" || c === '"' || c === "`") {
-      for (i++; i < src.length && src[i] !== c; i++) if (src[i] === "\\") i++;
-    } else if (c === "(") depth++;
-    else if (c === ")" && --depth === 0) return src.slice(start, i + 1);
-  }
-  return null;
+/** True only if the exact target test ran AND passed AND the run exited cleanly. An empty selection, a missing report or a
+ * different test with a similar title is NOT a pass. */
+export function verifyPassed(failure, runner = runSuite, root = process.cwd()) {
+  const { code, report } = runner({ grep: escapeRe(failure.title), file: relative(root, failure.file) });
+  if (code !== 0 || !report) return false;
+  const ran = [...specsOf(report)].filter((s) => s.title === failure.title && resolve(s.file) === resolve(failure.file));
+  return ran.length > 0 && ran.every((s) => s.test.status === "expected" && (s.test.results ?? []).every((r) => r.status === "passed"));
 }
 
-/** Quote/whitespace-insensitive form, so source `"x"` matches Playwright's printed `'x'`. */
-const normalize = (call) => call.replace(/\s+/g, " ").replace(/"/g, "'");
-
-/** The full locator call Playwright reports as failing, e.g. getByRole('button', { name: 'Go' }). */
-function brokenLocatorFrom(error) {
-  const m = error.match(/(?:waiting for|Locator:)\s+((?:locator|getBy\w+)\()/);
-  if (!m) return null;
-  return balancedCall(error, m.index + m[0].length - m[1].length);
+/** True if any tracked file has uncommitted changes. */
+export function workingTreeDirty() {
+  return execFileSync("git", ["status", "--porcelain", "--untracked-files=no"], { encoding: "utf-8" }).trim().length > 0;
 }
 
-const LOCATOR_CALL = /(this\.page|\bpage)\.(?=locator\(|getBy\w+\()/g;
-const SOURCE_DIRS = ["pages", "tests", "utils", "fixtures"];
-
-/** Every page.locator()/page.getBy*() call in the repo's tracked TS sources. */
-function locatorCalls() {
-  const files = execFileSync("git", ["ls-files", "--", ...SOURCE_DIRS], { encoding: "utf-8" })
-    .split("\n")
-    .filter((f) => f.endsWith(".ts"));
-  const calls = [];
-  for (const file of files) {
-    const src = readFileSync(file, "utf-8");
-    for (const m of src.matchAll(LOCATOR_CALL)) {
-      const text = balancedCall(src, m.index + m[0].length);
-      if (!text) continue;
-      const call = `${m[1]}.${text}`;
-      calls.push({
-        file,
-        src,
-        receiver: m[1],
-        call,
-        index: m.index,
-        line: src.slice(0, m.index).split("\n").length,
-        norm: normalize(text),
+// ---- deciding ------------------------------------------------------------------------------------------------------------
+/** One decision per failing test. Failures past `max` are recorded as needs_human, never dropped. A failure a previous heal
+ * already fixed (a page object shared by several tests) is confirmed by re-running it, not healed twice. */
+export async function healFailures(fails, healer, max, verify = verifyPassed) {
+  const decisions = [];
+  const healed = [];
+  for (const f of fails.slice(0, max)) {
+    if (healed.length && (await verify(f))) {
+      const first = healed[0];
+      decisions.push({
+        test: f.title, outcome: "healed", file: first.file, from: first.from, to: first.to, files: first.files ?? [], usage: {},
+        source: `same fix as ${first.test} (shared locator), re-run passed`,
       });
+      continue;
     }
+    const d = await healer.heal(f);
+    decisions.push(d);
+    if (d.outcome === "healed") healed.push(d);
   }
-  return calls;
-}
-
-/**
- * Find the ONE source call that failed. Prefer the call on the error's reported
- * line; otherwise it must be the only match in the repo. Ambiguity is rejected,
- * never guessed.
- */
-function locateInSource(expr, location) {
-  const norm = normalize(expr);
-  const hits = locatorCalls().filter((c) => c.norm === norm);
-  if (hits.length === 0) return { why: `locator ${expr} not found as a page.locator()/getBy*() call in source (dynamic?)` };
-  if (location?.file) {
-    const rel = relative(process.cwd(), resolve(location.file));
-    const here = hits.filter((c) => c.file === rel && c.line === location.line);
-    if (here.length === 1) return here[0];
-    if (here.length > 1) return { why: `${here.length} identical locators on ${rel}:${location.line} — ambiguous` };
+  for (const f of fails.slice(max)) {
+    decisions.push({ test: f.title, outcome: "needs_human", reason: "beyond_max", why: `not attempted: beyond --max ${max}` });
   }
-  if (hits.length === 1) return hits[0];
-  return { why: `${hits.length} identical locator calls in source and no unique failure location — ambiguous` };
+  return decisions;
 }
 
-/** Ask the model to replace an exact locator expression (semantic, intent-preserving). */
-async function proposeReplacement({ call, snapshot }) {
-  const prompt =
-    `You are a Playwright (TypeScript) test healer. A locator broke after a UI change.\n` +
-    `Replace exactly this locator expression:\n  ${call}\n\n` +
-    `Page snapshot captured at the moment the test failed:\n${snapshot}\n\n` +
-    `Return ONLY the drop-in replacement expression (same leading receiver, e.g. "this.page.getByLabel('Username')"). ` +
-    `No prose, no code fence, no trailing semicolon. Prefer a resilient semantic locator ` +
-    `(getByRole/getByLabel/getByTestId over raw CSS/id). Target the SAME element — never change the test's intent.`;
-  const resp = await fetch(`${HEAL_BASE_URL}/chat/completions`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", ...(HEAL_API_KEY ? { Authorization: `Bearer ${HEAL_API_KEY}` } : {}) },
-    body: JSON.stringify({ model: HEAL_MODEL, messages: [{ role: "user", content: prompt }], temperature: 0, max_tokens: 200 }),
-  });
-  const data = await resp.json();
-  let out = (data.choices?.[0]?.message?.content || "").trim();
-  out = out.replace(/```[a-z]*\n?|```/g, "").trim().split("\n")[0].replace(/;$/, "").trim();
-  return out;
+/** Write heal-summary.json (counts, usage total, every decision) into the test artifacts dir; returns its path. */
+export function writeSummary(decisions, started, runId, directory = null) {
+  const dir = resolve(directory ?? process.env.HEAL_ARTIFACTS_DIR ?? "test_artifacts");
+  mkdirSync(dir, { recursive: true });
+  const counts = Object.fromEntries(["healed", "needs_human", "not_drift"].map((k) => [k, decisions.filter((d) => d.outcome === k).length]));
+  const summary = {
+    run_id: runId, started, finished: new Date().toISOString(), failures: decisions.length, counts, usage: runTotal(decisions), decisions,
+  };
+  const file = join(dir, "heal-summary.json");
+  writeFileSync(`${file}.tmp`, JSON.stringify(summary, null, 2), "utf-8");
+  renameSync(`${file}.tmp`, file);
+  return file;
 }
 
-async function main() {
-  if (OPEN_PR && execFileSync("git", ["status", "--porcelain"], { encoding: "utf-8" }).trim()) {
+const tokens = (d) => {
+  const u = d.usage ?? {};
+  return `tokens ${u.input_tokens ?? 0} in / ${u.output_tokens ?? 0} out, ${u.calls ?? 0} call(s)`;
+};
+
+export function printDecisions(decisions, log = console.log) {
+  log("\n[heal] decisions:");
+  for (const d of decisions) {
+    if (d.outcome === "healed") {
+      log(`  [healed] ${d.test}: ${d.file}: ${d.from} -> ${d.to}  (${tokens(d)})`);
+    } else {
+      log(`  [${d.outcome}]${d.reason ? ` [${d.reason}]` : ""} ${d.test}: ${d.why}  (${tokens(d)})`);
+    }
+    for (const note of d.notes ?? []) log(`      note: ${note}`);
+  }
+  const t = runTotal(decisions);
+  log(`[heal] run total: ${t.calls} model call(s), ${t.input_tokens} input / ${t.output_tokens} output tokens, ${t.images} image(s)`);
+}
+
+// ---- the pull request ----------------------------------------------------------------------------------------------------
+const MD_SPECIAL = new Set("\\`*_[]()<>#|!~@&{}");
+
+/** `value` as text on one line: control characters and line breaks become a space, capped (it came from the service). */
+export function oneLine(value, limit = 300) {
+  const text = [...String(value ?? "")]
+    .map((c) => {
+      const n = c.codePointAt(0);
+      return n < 32 || n === 127 || (n >= 0x80 && n < 0xa0) || c === " " || c === " " ? " " : c;
+    })
+    .join("");
+  return text.split(/\s+/).filter(Boolean).join(" ").slice(0, limit);
+}
+
+/** `value` safe to put in a markdown line: one line, and every character that makes a link, an image, HTML, a heading, a
+ * mention or emphasis is escaped (a service string cannot add a link or a section to a PR). */
+export function mdEscape(value, limit = 300) {
+  return [...oneLine(value, limit)]
+    .map((c) => (c === "@" ? "&#64;" : c === "<" ? "&lt;" : c === ">" ? "&gt;" : c === "&" ? "&amp;" : MD_SPECIAL.has(c) ? "\\" + c : c))
+    .join("");
+}
+
+/** `value` as an inline code span whose fence is longer than any backtick run inside it. */
+export function mdCode(value, limit = 300) {
+  const text = oneLine(value, limit);
+  const runs = text.match(/`+/g);
+  if (!runs) return `\`${text}\``;
+  const fence = "`".repeat(Math.max(...runs.map((r) => r.length)) + 1);
+  return `${fence} ${text} ${fence}`;
+}
+
+/** One single-line entry per healed test for the commit body (no service text can start a new line or a trailer). */
+export const commitLines = (healed) => healed.map((d) => `- ${oneLine(d.test, 200)}: ${oneLine(d.from, 200)} -> ${oneLine(d.to, 200)}`);
+
+/** The PR description. Every string that came from the service or the test run is escaped. */
+export function buildPrBody(healed, other) {
+  let body = "Automated locator healing (out-of-band).\n\n## Healed (locators only, intent preserved)\n";
+  body += healed.map((d) => `- **${mdEscape(d.test)}** -- ${mdCode(d.from)} -> ${mdCode(d.to)} (${mdEscape(d.why || d.source)})`).join("\n");
+  if (other.length) {
+    body += "\n\n## Needs human review (not touched)\n" + other.map((d) => `- **${mdEscape(d.test)}** -- ${mdEscape(d.why)}`).join("\n");
+  }
+  return body;
+}
+
+/** Branch, commit ONLY the healed files, push, and open one PR listing the decisions. */
+function openPr(healed, other) {
+  const branch = `heal/${new Date().toISOString().slice(0, 10)}-${Date.now().toString(36)}`;
+  const files = [...new Set(healed.flatMap((d) => d.files ?? [d.file]))].sort();
+  execFileSync("git", ["checkout", "-b", branch]);
+  // Stage and commit ONLY the files this run healed, never unrelated work in the caller's tree.
+  execFileSync("git", ["add", "--", ...files]);
+  execFileSync("git", ["commit", "-qm", `fix(heal): update ${healed.length} drifted locator(s)\n\n` + commitLines(healed).join("\n"), "--", ...files]);
+  execFileSync("git", ["push", "-q", "-u", "origin", branch]);
+  execFileSync("gh", ["pr", "create", "--base", "main", "--head", branch, "--title",
+    `Locator healing -- ${healed.length} fixed, ${other.length} for review`, "--body", buildPrBody(healed, other)], { stdio: "inherit" });
+}
+
+// ---- main ----------------------------------------------------------------------------------------------------------------
+/** The `--grep`, `--max` and `--open-pr` flags, or {error} naming the first problem. */
+export function parseArgs(args) {
+  const valueOf = (flag) => {
+    const i = args.indexOf(flag);
+    if (i < 0) return { value: null };
+    const v = args[i + 1];
+    return v === undefined || v.startsWith("--") ? { error: `${flag} requires a value` } : { value: v };
+  };
+  const known = new Set(["--grep", "--max", "--open-pr"]);
+  for (const a of args) if (a.startsWith("--") && !known.has(a)) return { error: `unknown flag ${a}` };
+  const grep = valueOf("--grep");
+  const max = valueOf("--max");
+  if (grep.error || max.error) return { error: grep.error ?? max.error };
+  const n = max.value === null ? 10 : Number(max.value);
+  if (!Number.isInteger(n) || n < 1) return { error: "--max must be a positive integer" };
+  return { grep: grep.value, max: n, openPr: args.includes("--open-pr") };
+}
+
+const usageError = (msg) => {
+  console.error(`[heal] ${msg}\nUsage: node scripts/heal.mjs [--grep <name>] [--max N] [--open-pr]`);
+  process.exit(2);
+};
+
+export async function main(argv = process.argv.slice(2)) {
+  const settings = settingsFromEnv();
+  if (!settings.url) {
+    console.error("Set HEAL_SERVICE_URL (the heal service, for example http://localhost:8765).");
+    process.exit(2);
+  }
+  const args = parseArgs(argv);
+  if (args.error) usageError(args.error);
+  if (args.openPr && workingTreeDirty()) {
     usageError("--open-pr requires a clean git worktree (commit or stash your changes first)");
   }
-  console.log(`[heal] running suite${GREP ? ` (grep: ${GREP})` : ""}…`);
-  const fails = failuresOf(runSuite(GREP));
+  const started = new Date().toISOString();
+  const runId = Math.random().toString(16).slice(2, 14);
+  console.log(`[heal] running suite${args.grep ? ` (grep: ${args.grep})` : ""}...`);
+  const { report } = runSuite({ grep: args.grep });
+  if (!report) {
+    console.error("[heal] the suite produced no JSON report - nothing to heal.");
+    process.exit(1);
+  }
+  const fails = failuresOf(report);
   if (fails.length === 0) {
-    console.log("[heal] no failures — nothing to heal.");
+    console.log("[heal] no failures - nothing to heal.");
     return;
   }
   console.log(`[heal] ${fails.length} failing test(s).`);
-  const decisions = [];
 
-  for (const f of fails.slice(0, MAX)) {
-    const expr = brokenLocatorFrom(f.error);
-    if (!expr) {
-      decisions.push({ test: f.title, outcome: "human", why: "no broken locator in the error — looks like a logic/app failure, not locator drift" });
-      continue;
-    }
-    const loc = locateInSource(expr, f.location);
-    if (loc.why) {
-      decisions.push({ test: f.title, outcome: "human", why: loc.why });
-      continue;
-    }
-    if (!f.snapshot) {
-      decisions.push({ test: f.title, outcome: "human", why: "no failure-time page snapshot (error-context) captured — refusing to guess the page state" });
-      continue;
-    }
-    const proposed = await proposeReplacement({ call: loc.call, snapshot: f.snapshot });
-    if (!proposed || proposed === loc.call) {
-      decisions.push({ test: f.title, outcome: "human", why: "model produced no usable replacement" });
-      continue;
-    }
-    if (!validReplacement(proposed, loc.receiver)) {
-      decisions.push({ test: f.title, outcome: "human", why: `model reply rejected (not a single literal-argument ${loc.receiver} locator call): ${JSON.stringify(proposed.slice(0, 120))}` });
-      continue;
-    }
-    // Replace exactly the one located call, by position (no String.replace, so no `$&` expansion).
-    const healed = loc.src.slice(0, loc.index) + proposed + loc.src.slice(loc.index + loc.call.length);
-    writeFileSync(loc.file, healed);
-    const stillFails = failuresOf(runSuite(escapeRe(f.title))).some((x) => x.title === f.title);
-    if (stillFails) {
-      writeFileSync(loc.file, loc.src); // revert — never leave a non-passing change
-      decisions.push({ test: f.title, outcome: "human", why: `proposed "${proposed}" did not make the test pass — reverted; likely an app bug` });
-    } else {
-      decisions.push({ test: f.title, outcome: "healed", file: loc.file, from: loc.call, to: proposed, source: "page snapshot captured at the failure" });
-    }
-  }
+  const healer = new Healer(new ServiceClient(settings.url, settings.token), settings, (f) => verifyPassed(f), {
+    runId,
+    // the framework's own second check on every locator the service writes (the AST validator is the first)
+    secondCheck: (expression, original) => {
+      const receiver = receiverText(original);
+      return receiver !== null && validReplacement(expression, receiver);
+    },
+  });
+  const decisions = await healFailures(fails, healer, args.max);
 
-  console.log("\n[heal] decisions:");
-  for (const d of decisions) console.log("  " + JSON.stringify(d));
+  printDecisions(decisions);
+  const summary = writeSummary(decisions, started, runId);
   const healed = decisions.filter((d) => d.outcome === "healed");
-  const human = decisions.filter((d) => d.outcome === "human");
-
-  if (OPEN_PR && healed.length > 0) {
-    const branch = `heal/${new Date().toISOString().slice(0, 10)}-${Date.now().toString(36)}`;
-    const files = [...new Set(healed.map((d) => d.file))];
-    execFileSync("git", ["checkout", "-b", branch]);
-    execFileSync("git", ["add", "--", ...files]);
-    // Commit ONLY the healed files, never unrelated work in the caller's tree.
-    execFileSync("git", ["commit", "-qm", `fix(heal): update ${healed.length} drifted locator(s)\n\n` + healed.map((d) => `- ${d.test}: ${d.from} -> ${d.to}`).join("\n"), "--", ...files]);
-    execFileSync("git", ["push", "-q", "-u", "origin", branch]);
-    const body =
-      `Automated locator healing (out-of-band).\n\n## Healed (locators only, intent preserved)\n` +
-      healed.map((d) => `- **${d.test}** — \`${d.from}\` → \`${d.to}\` (grounded in ${d.source})`).join("\n") +
-      (human.length ? `\n\n## Needs human review (not touched)\n` + human.map((d) => `- **${d.test}** — ${d.why}`).join("\n") : "");
-    execFileSync("gh", ["pr", "create", "--base", "main", "--head", branch, "--title", `Locator healing — ${healed.length} fixed, ${human.length} for review`, "--body", body], { stdio: "inherit" });
-  }
-  console.log(`\n[heal] done: ${healed.length} healed, ${human.length} for human review.`);
+  const other = decisions.filter((d) => d.outcome !== "healed");
+  if (args.openPr && healed.length > 0) openPr(healed, other);
+  console.log(`\n[heal] done: ${healed.length} healed, ${other.length} for human review. Summary: ${summary}`);
 }
 
-main().catch((e) => {
-  console.error(e);
-  process.exit(1);
-});
+// run only when this file is the script (not when a test imports it); `import.meta` stays out so the Playwright runner can load it
+if (path.basename(process.argv[1] ?? "") === "heal.mjs") {
+  main().catch((e) => {
+    console.error(e instanceof HealServiceError ? e.message : e);
+    process.exit(1);
+  });
+}
