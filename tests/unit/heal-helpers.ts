@@ -212,7 +212,7 @@ export class Verify {
   };
 }
 
-export function healer(root: string, service: FakeService, verify: Verify | ((failure: never, patched: never) => Promise<boolean>), live: FakeLive = new FakeLive(), extra = {}) {
+export function healer(root: string, service: FakeService, verify: Verify | Verify["fn"] | ((failure: Failure, patched: { file: string; line: number | null }) => Promise<boolean>), live: FakeLive = new FakeLive(), extra = {}) {
   const fn = typeof verify === "function" ? verify : verify.fn;
   const h = new Healer(service.client(), settingsFromEnv({ HEAL_SERVICE_URL: "http://svc" }), fn, {
     root, runId: "r1", liveFactory: () => live, env: { HEAL_DIR: ".heal" }, ...extra,
