@@ -31,7 +31,6 @@
 import type { Frame, Locator, Page } from "@playwright/test";
 
 const SUBTAG = /^[A-Za-z]{2,3}$/;
-const SIGNALS = "() => [document.documentElement.lang || '', navigator.language || '']";
 const headers = new WeakMap<object, string>();
 
 /** The plain primary language subtag of `value` ("fr-CA" -> "fr"), lower case; "" when it is not one. */
@@ -87,7 +86,8 @@ function pageOf(receiver: Receiver): Page {
 async function currentLanguage(receiver: Receiver): Promise<string> {
   try {
     const page = pageOf(receiver);
-    const [htmlLang, locale] = (await page.evaluate(SIGNALS)) as [string, string];
+    // a real function: Playwright for JavaScript runs a string as an expression and would not call it
+    const [htmlLang, locale] = await page.evaluate(() => [document.documentElement.lang || "", navigator.language || ""]);
     return pageLanguage(htmlLang, locale, headers.get(page));
   } catch {
     return "";
