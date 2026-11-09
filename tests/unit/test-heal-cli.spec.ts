@@ -51,7 +51,7 @@ test.describe("the JSON report", { tag: ["@unit", "@regression"] }, () => {
     const fails = failuresOf(report(failing, spec("fine", PASSED, "expected")));
     expect(fails).toEqual([{
       title: "valid login", file, error: "Error: boom", stack: "Error: boom\n    at /repo/pages/p.ts:5:1",
-      location: { file: "/repo/pages/p.ts", line: 5 }, route: "/secure",
+      location: { file: "/repo/pages/p.ts", line: 5 }, route: "/secure", capture: null,
     }]);
   });
 

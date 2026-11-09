@@ -23,6 +23,15 @@ export interface Failure {
   stack?: string;
   location?: { file: string; line: number } | null;
   route?: string | null;
+  /** the failing page as the test left it (parseCapture), or null */
+  capture?: Capture | null;
+}
+
+export interface Capture {
+  path: string;
+  inventory: Json[];
+  more: number;
+  aria: string | null;
 }
 
 export interface PlannedFile {
@@ -100,7 +109,10 @@ export function planPatches(candidate: Json, sent: Record<string, string>, roots
 export function replaceFile(file: string, data: Buffer | string): void;
 export function writeFiles(root: string, planned: PlannedFile[], write?: (file: string, data: Buffer) => void): void;
 export function revertFiles(root: string, planned: PlannedFile[], write?: (file: string, data: Buffer) => void): void;
-export function matchRef(inventory: Json[], facts: Json): string | null;
+export function matchRef(inventory: Json[], facts: Json, options?: { captured?: boolean }): string | null;
+export const HEAL_CAPTURE_ATTACHMENT: string;
+export function capturePage(page: any, probe?: string): Promise<Capture>;
+export function parseCapture(text: unknown, baseUrl: string): Capture | null;
 export class OriginGuard {
   constructor(baseUrl: string, options?: { always?: boolean; allow?: string[] });
   origin: string;

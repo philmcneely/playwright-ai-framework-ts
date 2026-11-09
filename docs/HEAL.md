@@ -16,11 +16,13 @@ same contract fixtures.)
 npm run heal -- [--grep <name>] [--max N] [--open-pr]
 ```
 
-1. Run the suite with the JSON reporter (`HEAL_RUN=1` is set for the child so nothing is recorded as a green run) and collect
-   the failures: message, stack and, when the framework's fixtures are used, the page path at the failure.
+1. Run the suite with the JSON reporter (`HEAL_RUN=1` is set for the child so nothing is recorded as a green run, and
+   `HEAL_CAPTURE=1` so a failing test attaches its page as it left it) and collect the failures: message, stack and, when the
+   framework's fixtures are used, the page path and the **capture** at the failure (see below).
 2. For each failure reopen the failing route in a fresh Chromium (`HEAL_STORAGE_STATE` signs it in), run the **vendored page
    probe** (`scripts/heal-probe.js`) for the element inventory, read the aria snapshot and the language signals, and send
-   one request to the service: the stack's files under the source roots (with sha256), the inventory, the aria snapshot, the
+   one request to the service. When the failure carries a capture, its inventory and aria snapshot are sent instead of the
+   reopened page's (which has lost whatever the test had opened: a panel, a tab, a dialog). The request holds the stack's files under the source roots (with sha256), the inventory, the aria snapshot, the
    last green run's fingerprint and, with `HEAL_VISION=auto|on`, one masked screenshot.
 3. The service answers with a `try`: a candidate locator, the element it expects, and the patch. The client then
    - checks the candidate **in the live page** before it touches a file: it must match exactly one element, and that element
@@ -76,7 +78,13 @@ settle the heal with **no model call**. Without one every heal starts at the tex
   run itself never installs the recorder.
 
 The fixture also, when a test fails, attaches the **path** of the page it
-was on (`heal-page-url`, no query or fragment) so the heal can reopen the failing route.
+was on (`heal-page-url`, no query or fragment) so the heal can reopen the failing route. During a heal's own runs only
+(`HEAL_CAPTURE=1`) it attaches the **capture** too (`heal-page-capture`): the probe listing and the redacted aria snapshot of the
+page as the failing test left it. No screenshot, no HTML, no input value, and nothing in an ordinary run's report. Page
+text is page text, though: a message the app wrote that repeats what the test typed ("Hello jdoe@example.com") is in it, as it
+would be on a reopened page that showed the same message. A frame in `designMode` (editable as a whole) sends no aria snapshot. The heal reads
+it as untrusted (same-origin path only, listing allowlisted again, aria redacted again, size capped). The live checks still run on
+the reopened page; what they hit is named against the captured listing, ignoring only whether the element is shown.
 
 ## Language branches
 
@@ -132,6 +140,9 @@ Every service reply is untrusted input.
 - The re-run must pass **the whole test**. A test with two drifted locators cannot be healed one at a time: the first fix is
   reverted because the test still fails on the second. Heal one drift per test, or fix the second by hand and run again.
 - A branch candidate that would need `await` in a getter or field initializer is refused (see above).
+- The live check runs on the **reopened** page. An element that exists only in the failing state and is not reachable there
+  (a popover the test opened, an iframe a step injected) is listed by the capture but cannot be checked, so it is not healed.
+- With a capture, no screenshot is sent: a screenshot of the reopened page would show another state than the listing.
 
 ## Testing
 

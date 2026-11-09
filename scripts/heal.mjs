@@ -43,11 +43,13 @@
  * ===============================================================================
  */
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import path, { join, relative, resolve } from "node:path";
+import path, { dirname, join, relative, resolve } from "node:path";
 import { receiverText } from "./heal-code.mjs";
-import { HealServiceError, Healer, ServiceClient, runTotal, safeRoute, settingsFromEnv } from "./heal-client.mjs";
+import {
+  HEAL_CAPTURE_ATTACHMENT, HealServiceError, Healer, ServiceClient, parseCapture, runTotal, safeRoute, settingsFromEnv,
+} from "./heal-client.mjs";
 import { validReplacement } from "./heal-validate.mjs";
 
 export { validReplacement };
@@ -59,7 +61,7 @@ const HEAL_PAGE_ATTACHMENT = "heal-page-url";
 
 // ---- running the suite ---------------------------------------------------------------------------------------------------
 /** Run the suite (optionally one file and a title filter) with the JSON reporter. HEAL_RUN is set for the child so the
- * fingerprint recorder records nothing during a heal. Returns {code, report}; report is null when none was produced. */
+ * fingerprint recorder records nothing during a heal, and HEAL_CAPTURE so a failing test attaches its page as it left it. Returns {code, report}; report is null when none was produced. */
 export function runSuite({ grep = null, file = null, env = process.env } = {}) {
   const out = join(mkdtempSync(join(tmpdir(), "heal-")), "report.json");
   const args = ["playwright", "test", "--retries=0", "--reporter=json"];
@@ -69,7 +71,7 @@ export function runSuite({ grep = null, file = null, env = process.env } = {}) {
   if (grep) args.push("--grep", grep);
   let code = 0;
   try {
-    execFileSync("npx", args, { env: { ...env, PLAYWRIGHT_JSON_OUTPUT_NAME: out, HEAL_RUN: "1" }, stdio: "ignore" });
+    execFileSync("npx", args, { env: { ...env, PLAYWRIGHT_JSON_OUTPUT_NAME: out, HEAL_RUN: "1", HEAL_CAPTURE: "1" }, stdio: "ignore" });
   } catch (e) {
     code = typeof e.status === "number" ? e.status : 1; // a non-zero exit on failures is expected
   }
@@ -77,6 +79,8 @@ export function runSuite({ grep = null, file = null, env = process.env } = {}) {
     return { code, report: JSON.parse(readFileSync(out, "utf-8")) };
   } catch {
     return { code, report: null };
+  } finally {
+    rmSync(dirname(out), { recursive: true, force: true }); // the report holds the failing pages' captures
   }
 }
 
@@ -122,6 +126,7 @@ export function failuresOf(report, baseUrl = settingsFromEnv().baseUrl) {
       location: errors.find((e) => e.location)?.location ?? null,
       // an attachment is a file a test run wrote: only a same-origin path is accepted, checked here where it is read
       route: safeRoute(attachmentText(last, HEAL_PAGE_ATTACHMENT)?.trim(), baseUrl),
+      capture: parseCapture(attachmentText(last, HEAL_CAPTURE_ATTACHMENT), baseUrl), // the page as the failing test left it
     });
   }
   return fails;

@@ -519,16 +519,29 @@ export function revertFiles(root, planned, write = replaceFile) {
 }
 
 // ---- the live page -------------------------------------------------------------------------------------------------------
-const withoutBox = (item) => Object.fromEntries(Object.entries(item).filter(([k]) => !["box", "frame", "shadow", "ref"].includes(k)));
+const without = (keys) => (item) => Object.fromEntries(Object.entries(item).filter(([k]) => !keys.includes(k)));
+const withoutBox = without(["box", "frame", "shadow", "ref"]);
+// facts that only say what state the page is in: a listing captured at the failure and the reopened page differ in them
+const withoutState = without(["box", "frame", "shadow", "ref", "hidden", "top_at_center"]);
 
 /** The inventory ref of the element the probe described in `facts`: an exact match on everything the probe listed, else one
- * that ignores box, frame and shadow. null when no entry or several entries fit (the hit cannot be named). */
-export function matchRef(inventory, facts) {
+ * that ignores box, frame and shadow, else one that also ignores whether it is shown (an element the failing test had opened
+ * is closed again on the reopened page). null when no entry or several entries fit (the hit cannot be named).
+ * With `captured` (the inventory is the failing page's, the hit is on the reopened page) only a unique fit without the state
+ * facts names a hit: two twins can swap which one is shown between the two states, so an exact fit proves nothing there. */
+export function matchRef(inventory, facts, { captured = false } = {}) {
+  if (captured) {
+    const fit = inventory.filter((e) => isDeepStrictEqual(withoutState(e), withoutState(facts)));
+    return fit.length === 1 ? fit[0].ref : null;
+  }
   const plain = Object.fromEntries(Object.entries(facts).filter(([k]) => k !== "ref"));
   const exact = inventory.filter((e) => isDeepStrictEqual(Object.fromEntries(Object.entries(e).filter(([k]) => k !== "ref")), plain));
   if (exact.length === 1) return exact[0].ref;
-  const loose = inventory.filter((e) => isDeepStrictEqual(withoutBox(e), withoutBox(facts)));
-  return loose.length === 1 ? loose[0].ref : null;
+  for (const strip of [withoutBox, withoutState]) {
+    const fit = inventory.filter((e) => isDeepStrictEqual(strip(e), strip(facts)));
+    if (fit.length) return fit.length === 1 ? fit[0].ref : null;
+  }
+  return null;
 }
 
 function originOf(url) {
@@ -625,6 +638,101 @@ const WAS_PASSWORD = `(() => {
   } });
 })();`;
 
+/** What a person typed into an editable region is page text in an aria snapshot: empty those regions, in every frame and open
+ * shadow root. Only ever run on a page that is about to be thrown away. */
+async function clearEditable(page) {
+  let whole = false; // a frame in designMode is editable as a whole: nothing in it can be told apart from what was typed
+  for (const frame of page.frames?.() ?? [page]) {
+    const editable = await frame.evaluate(() => {
+      /* eslint-disable no-undef -- runs in the page */
+      if (String(document.designMode).toLowerCase() === "on") return true;
+      const clear = (root) => {
+        // isContentEditable, not the attribute: it also covers inherited and plaintext-only regions
+        for (const el of root.querySelectorAll("*")) if (el.isContentEditable && !el.parentElement?.isContentEditable) el.textContent = "";
+        for (const el of root.querySelectorAll("*")) if (el.shadowRoot) clear(el.shadowRoot);
+      };
+      clear(document);
+      return false;
+      /* eslint-enable no-undef */
+    }).catch(() => true); // a frame that cannot be cleared is treated like one in designMode
+    if (editable === true) whole = true;
+  }
+  return !whole;
+}
+
+/** True when any frame of `page` is in designMode or holds an editable region (or cannot be read). Changes nothing. */
+async function hasEditable(page) {
+  for (const frame of page.frames?.() ?? [page]) {
+    const found = await frame.evaluate(() => {
+      /* eslint-disable no-undef -- runs in the page */
+      if (String(document.designMode).toLowerCase() === "on") return true;
+      const any = (root) => [...root.querySelectorAll("*")].some((el) => el.isContentEditable || (el.shadowRoot && any(el.shadowRoot)));
+      return any(document);
+      /* eslint-enable no-undef */
+    }).catch(() => true);
+    if (found !== false) return true;
+  }
+  return false;
+}
+
+// ---- the page at the failure ---------------------------------------------------------------------------------------------
+// A reopened route has lost whatever the failing test had opened (a panel, a tab, a dialog), so during a heal's own runs
+// (HEAL_CAPTURE=1, set by runSuite) the support fixture captures the failing page itself: the probe listing and the redacted
+// aria snapshot, nothing else (no screenshot, no HTML, no input value). The heal sends that and checks on the reopened page.
+export const HEAL_CAPTURE_ATTACHMENT = "heal-page-capture";
+const CAPTURE_MAX_CHARS = 2_000_000;
+const CAPTURE_MAX_ITEMS = 500; // the probe's own cap
+const CAPTURE_MAX_MORE = 1_000_000;
+const CAPTURE_TIMEOUT_MS = 5_000; // per failing test, at most
+
+/** The failing `page` as the test left it: {path, inventory, more, aria}. Called by the support fixture after the test. */
+export async function capturePage(page, probe = vendoredProbe()) {
+  const run = async () => {
+    const data = (await page.evaluate(probeFunction(probe))) ?? {};
+    const items = (Array.isArray(data.items) ? data.items : []).filter((i) => i && typeof i === "object");
+    let aria = null;
+    try {
+      // the test's own page is never changed (a later fixture, the trace or the video still sees it): when it has a region a
+      // person can type into, no aria snapshot is sent at all
+      if (!(await hasEditable(page))) aria = redactTypedValues(await page.locator("body").ariaSnapshot());
+    } catch {
+      /* no snapshot */
+    }
+    return {
+      path: new URL(page.url(), "http://base.invalid").pathname || "/",
+      inventory: cleanInventory(items.map((item, i) => ({ ...item, ref: `e${i}` }))),
+      more: Number(data.more) || 0,
+      aria,
+    };
+  };
+  let timer;
+  try {
+    return await Promise.race([run(), new Promise((_, reject) => { timer = setTimeout(() => reject(new Error("capture timed out")), CAPTURE_TIMEOUT_MS); })]);
+  } finally {
+    globalThis.clearTimeout(timer);
+  }
+}
+
+/** A capture attachment as the heal uses it, or null. It is a file a test run wrote, so it is checked like one: a same-origin
+ * path, the listing allowlisted again and renumbered, the aria redacted again and capped. */
+export function parseCapture(text, baseUrl) {
+  if (typeof text !== "string" || !text || text.length > CAPTURE_MAX_CHARS) return null;
+  let raw;
+  try {
+    raw = JSON.parse(text);
+  } catch {
+    return null;
+  }
+  if (!raw || typeof raw !== "object" || Array.isArray(raw) || !Array.isArray(raw.inventory)) return null;
+  const route = safeRoute(raw.path, baseUrl);
+  if (!route) return null;
+  const items = raw.inventory.slice(0, CAPTURE_MAX_ITEMS).filter((i) => i && typeof i === "object" && !Array.isArray(i));
+  const inventory = cleanInventory(items).map(({ ref: _ref, ...item }, i) => ({ ref: `e${i}`, ...item }));
+  const aria = typeof raw.aria === "string" && raw.aria.length <= LIMITS.ariaChars ? redactTypedValues(raw.aria) : null;
+  const more = Number.isSafeInteger(raw.more) && raw.more >= 0 ? Math.min(raw.more, CAPTURE_MAX_MORE) : 0;
+  return { path: new URL(route, "http://base.invalid").pathname, inventory, more, aria };
+}
+
 /** A fresh Chromium on the failing route (HEAL_STORAGE_STATE when set). It stays open for the whole heal so each candidate
  * can be checked on the same page the inventory came from. With HEAL_VISION off it never takes a screenshot. */
 export class LivePage {
@@ -691,20 +799,7 @@ export class LivePage {
     this.language = pageLanguage(meta.lang, meta.browser_lang, header);
     let aria = null;
     try {
-      // what a person typed into an editable region is page text in the snapshot: empty those regions, in every frame and open shadow
-      // root, in this throwaway page
-      for (const frame of this.page.frames?.() ?? [this.page]) {
-        await frame.evaluate(() => {
-          /* eslint-disable no-undef -- runs in the page */
-          const clear = (root) => {
-            for (const el of root.querySelectorAll("[contenteditable]:not([contenteditable=false i])")) el.textContent = "";
-            for (const el of root.querySelectorAll("*")) if (el.shadowRoot) clear(el.shadowRoot);
-          };
-          clear(document);
-          /* eslint-enable no-undef */
-        }).catch(() => undefined);
-      }
-      aria = redactTypedValues(await this.guard.active(() => this.page.locator("body").ariaSnapshot()));
+      if (await clearEditable(this.page)) aria = redactTypedValues(await this.guard.active(() => this.page.locator("body").ariaSnapshot()));
     } catch {
       /* no snapshot */
     }
@@ -794,7 +889,7 @@ export class LivePage {
     if (count !== 1) return [count, null];
     const data = await this.guard.active(() => loc.evaluate(this.probeFn));
     const facts = cleanInventory(data?.items ?? [])[0];
-    return [1, facts ? matchRef(this.inventory, facts) : null];
+    return [1, facts ? matchRef(this.inventory, facts, { captured: Boolean(this.captured) }) : null];
   }
 }
 
@@ -833,6 +928,18 @@ function checkedCandidate(resp) {
       Object.values(c.branches).every((v) => typeof v === "string")));
   if (!ok) throw new HealServiceError("the heal service sent a candidate that is not usable");
   return c;
+}
+
+/** The reopened page's snapshot with the failing page's listing and aria in its place. The live checks then name what they hit
+ * against that listing. A screenshot of the reopened page would show another state than the listing, so none is sent. */
+function withCapture(snap, capture, live, settings) {
+  live.inventory = capture.inventory;
+  live.captured = true;
+  if (snap.screenshot && settings.vision !== "off") {
+    live.notes = [...(live.notes ?? []), "no screenshot sent: the listing is of the page at the failure, the screenshot would not be"];
+  }
+  const { scroll: _scroll, ...viewport } = snap.viewport ?? {};
+  return { ...snap, path: capture.path, inventory: capture.inventory, more: capture.more, aria: capture.aria, screenshot: null, viewport };
 }
 
 /** Heals one failing test at a time through the service. All collaborators are injected, so a test can drive the whole loop
@@ -880,7 +987,8 @@ export class Healer {
     let kept = [];
     let notes = [];
     try {
-      const snap = await live.snapshot();
+      let snap = await live.snapshot();
+      if (failure.capture) snap = withCapture(snap, failure.capture, live, this.settings);
       notes = live.notes ?? [];
       const request = buildRequest(failure, files, stack, snap, this.settings, this.root, lastPass, this.runId);
       resp = await this.service.heal(request);
