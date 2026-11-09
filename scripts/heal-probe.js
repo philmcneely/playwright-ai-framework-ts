@@ -31,6 +31,10 @@ Features:
       (a button's inner span). They fill only the room the others leave under MAX (never pushing one out), in page order;
       `copy_more` counts the copy-holding elements left out for want of room (and each copy_only item then says `copy_cut`),
       so the service never calls a text unique from a list that is missing some
+    ✓ `copy_wrap`: the listed element's whole copy is that of a listed element inside it (said by the DOM), so a text locator
+      matches the inner one, not this
+    ✓ pw_text and a copy_only item's copy are withheld when they hold an address, a long run of digits (6 for a copy_only item,
+      9 otherwise) or a token-like word; `output` and the copy inside a grid, list or tree role are never listed as copy_only
     ✓ `for_attr`: the `for` of a label, and every `label[for]` is listed, so a locator on it can be counted
     ✓ testid is data-testid ONLY; data-test, data-qa and data-cy are separate keys (data_test, data_qa, data_cy), so the
       service can honour whichever attribute the client's Playwright config names as its test id attribute
@@ -62,7 +66,7 @@ Author: PMAC
   const cl = s => String(s == null ? '' : s).slice(0, 2000).replace(CONTROL, ' ');
   const clean = s => cl(s).replace(/\s+/g, ' ').trim();
   const SECRETISH = /token|csrf|auth|session|secret|email|password/i;
-  const VALUE_TAGS = /^(input|textarea|select|script|style|template|noscript)$/i;   // their content is a value or markup
+  const VALUE_TAGS = /^(input|textarea|select|output|script|style|template|noscript)$/i;   // their content is a value or markup
   const hasData = el => el.getAttributeNames().some(n => n.startsWith('data-'));
   const HOOKS = ['data-qa', 'data-testid', 'data-test', 'data-cy', 'id'];
   // [value, attribute] of the element's first hook in HOOKS order, or ['', '']
@@ -85,15 +89,21 @@ Author: PMAC
   // length and depth: it is the one place text is read from a page, so it is the one place a value could slip in.
   // a text-entry widget by any token of its role (Playwright reads role as a token list): its text may be typed data
   const ENTRY_ROLE = /(^|\s)(textbox|searchbox|combobox|spinbutton|slider)(?=\s|$)/i;
-  const copy = (node, win, depth = 0) => {
+  // text that could be personal or a secret: an address, a long run of digits (a card, a phone), a token-like word. A copy_only
+  // item is held to a shorter run (an OTP or a short code is 6 digits), and this is checked on pw_text of every item too
+  const SENSITIVE = /[^\s@]+@[^\s@]+\.[^\s@]+|(?:\d[ .-]?){9,}/;
+  const SENSITIVE_COPY = /[^\s@]+@[^\s@]+\.[^\s@]+|(?:\d[ .-]?){6,}/;
+  const tokenish = t => t.split(' ').some(w => w.length >= 24 && /\d/.test(w) && /[A-Za-z]/.test(w));
+  const COPY_NODES = 1000;       // nodes one read of a copy looks at, whatever they hold
+  const copy = (node, win, depth = 0, st = {n: 0}) => {
     let out = '';
     for (const c of node.childNodes) {
-      if (out.length > 400 || depth > 30) break;
+      if (out.length > 400 || depth > 30 || ++st.n > COPY_NODES) break;
       if (c.nodeType === 3) { out += c.nodeValue; continue; }
       if (c.nodeType !== 1 || VALUE_TAGS.test(c.tagName) || c.isContentEditable || ENTRY_ROLE.test(c.getAttribute('role') || '')) continue;
       const d = win.getComputedStyle(c).display;
       if (d === 'none') continue;
-      const inner = copy(c, win, depth + 1);
+      const inner = copy(c, win, depth + 1, st);
       out += d.startsWith('inline') ? inner : ' ' + inner + ' ';
     }
     return out;
@@ -115,7 +125,7 @@ Author: PMAC
   // chosen data, so it is never read): the service then cannot say the text is NOT there. Hidden text is read because
   // has_text reads it; a text holding a token-like run (24+ letters and digits) is not sent at all (pw_cut, empty).
   const PW_CHARS = 200, PW_NODES = 2000, PW_RAW = 2000;
-  const pwText = (el, win) => {
+  const pwText = (el, win, leaf) => {
     let raw = '', nodes = 0, cut = false;
     const walk = n => {
       if (cut) return;
@@ -123,7 +133,7 @@ Author: PMAC
       if (n.nodeType === 3) { raw += n.nodeValue || ''; return; }
       if (n.nodeType === 1) {
         if (n.tagName === 'SCRIPT' || n.tagName === 'STYLE' || n.tagName === 'NOSCRIPT') return;
-        if (/^(textarea|select)$/i.test(n.tagName) || n.isContentEditable
+        if (/^(textarea|select|output)$/i.test(n.tagName) || n.isContentEditable
             || ENTRY_ROLE.test(n.getAttribute('role') || '')) { cut = true; return; }
         if (/^input$/i.test(n.tagName)) {
           if (/^(button|submit|reset)$/i.test(n.type)) raw += ownCopy(n, win, true);
@@ -137,7 +147,7 @@ Author: PMAC
     };
     walk(el);
     const t = raw.replace(/\u200b/g, '').trim().replace(/\s+/g, ' ');
-    if (t.split(' ').some(w => w.length >= 24 && /\d/.test(w) && /[A-Za-z]/.test(w))) return {pw_text: '', pw_cut: true};
+    if (tokenish(t) || (leaf ? SENSITIVE_COPY : SENSITIVE).test(t)) return {pw_text: '', pw_cut: true};
     return {pw_text: t.slice(0, PW_CHARS), pw_cut: cut || t.length > PW_CHARS};
   };
   const describeOnly = only instanceof Element;      // called through locator.evaluate: just that element
@@ -147,31 +157,30 @@ Author: PMAC
   const isListed = el => el.matches(sel) || hasData(el) || clickable(el);
   // The next element up, across a shadow root to its host; bounded by the caller (a page can clobber parentElement).
   const up = n => { const p = n.parentNode; return p && p.nodeType === 11 ? p.host || null : p && p.nodeType === 1 ? p : null; };
-  // inside a form control, an editable region or a text-entry widget: the text there can be typed or chosen data
+  // inside a form control, an editable region, a text-entry widget or a widget of rows of data (grid, list, tree): the text
+  // there can be typed, chosen or somebody's data. (An element with such a role is still listed itself, as a control.)
+  const DATA_ROLE = /(^|\s)(listbox|option|grid|gridcell|treegrid|tree|treeitem|table|row|cell)(?=\s|$)/i;
   const inEntry = el => {
     for (let p = el, n = 0; p && n < 100; p = up(p), n++) {
       if (VALUE_TAGS.test(p.tagName) || /^(option|optgroup|datalist)$/i.test(p.tagName) || p.isContentEditable
-          || ENTRY_ROLE.test(p.getAttribute('role') || '')) return true;
+          || ENTRY_ROLE.test(p.getAttribute('role') || '') || DATA_ROLE.test(p.getAttribute('role') || '')) return true;
     }
     return false;
   };
-  // copy a person could be told apart from page copy: an address, a long run of digits, a token-like word
-  const SENSITIVE = /[^\s@]+@[^\s@]+\.[^\s@]+|(?:\d[ .-]?){9,}/;
-  const tokenish = t => t.split(' ').some(w => w.length >= 24 && /\d/.test(w) && /[A-Za-z]/.test(w));
   // The copy of a visible element that has a text node of its own and is not listed for another reason, else ''.
   const COPY_CHARS = 80;
   const hasOwnText = el => Array.from(el.childNodes).some(c => c.nodeType === 3 && c.nodeValue.trim());
   const copyOf = el => {
     if (!hasOwnText(el)) return '';
     const win = winOf(el), t = clean(copy(el, win));
-    if (!t || t.length > COPY_CHARS || SENSITIVE.test(t) || tokenish(t) || inEntry(el)) return '';
+    if (!t || t.length > COPY_CHARS || SENSITIVE_COPY.test(t) || tokenish(t) || inEntry(el)) return '';
     const r = el.getBoundingClientRect(), cs = win.getComputedStyle(el);
     if (!(r.width && r.height) || cs.visibility === 'hidden' || cs.display === 'none') return '';
     if (el.checkVisibility && !el.checkVisibility()) return '';             // e.g. inside a closed <details>
     const p = el.parentElement;
     return p && isListed(p) && clean(copy(p, win)) === t ? '' : t;       // the listed element around it already says it
   };
-  const build = (el, c, leaf, cut) => {
+  const build = (el, c, leaf, cut, wrap) => {
     const win = winOf(el), {frame, shadow, ox, oy} = c;
     const r = el.getBoundingClientRect(), cs = win.getComputedStyle(el);
     const hidden = !(r.width || r.height) || cs.visibility === 'hidden' || cs.display === 'none';
@@ -192,6 +201,7 @@ Author: PMAC
       hidden, box: hidden || !(r.width > 0 && r.height > 0) ? null
         : {x: r.left + ox, y: r.top + oy, width: r.width, height: r.height}};
     if (leaf) { item.copy_only = true; if (cut) item.copy_cut = true; }
+    if (wrap) item.copy_wrap = true;
     for (const n of el.getAttributeNames()) {
       // only names the key maps back to one way (no `_`: data-a_b and data-a-b would share data_a_b) and the service accepts
       if (/^data-[a-z0-9-]{1,60}$/.test(n) && !['data-testid', 'data-test', 'data-qa', 'data-cy'].includes(n) && !SECRETISH.test(n)) {
@@ -213,7 +223,7 @@ Author: PMAC
     if (row) { item.row = row; item.row_attr = rowAttr; }
     if (frame) item.frame = frame;
     if (shadow.length) item.shadow = shadow.join(' >> ');
-    return Object.assign(item, pwText(el, win));
+    return Object.assign(item, pwText(el, win, leaf));
   };
   // Page order, in one walk; what is listed is decided after it: every listed element first, then the copy_only ones in the
   // room that is left (never more than MAX in all).
@@ -235,7 +245,7 @@ Author: PMAC
         } catch (_) { /* a cross-origin frame cannot be read from here */ }
       }
       if (describeOnly) {
-        if (el === only) items.push(build(el, c, !isListed(el) && !!copyOf(el), false));       // as the whole listing would say it
+        if (el === only) items.push(build(el, c, !isListed(el) && !!copyOf(el), false, false));       // as the whole listing would say it
       } else if (isListed(el)) {
         if (lead >= MAX) more++;
         else { lead++; picks.push({el, c, leaf: false}); }
@@ -249,7 +259,16 @@ Author: PMAC
   let room = MAX - lead;
   const kept = picks.filter(p => !p.leaf || room-- > 0);
   copyMore += picks.length - kept.length;
-  for (const p of kept) items.push(build(p.el, p.c, p.leaf, copyMore > 0));
+  // A listed element whose whole copy is that of a listed element inside it (a wrapper of one text): getByText matches the
+  // inner one only. Said by the DOM, so a text drawn inside another's box is never taken for it.
+  const wraps = new Set();
+  for (const p of kept) {
+    const t = clean(copy(p.el, winOf(p.el)));
+    for (let a = t ? up(p.el) : null, n = 0; a && n < 100; a = up(a), n++) {
+      if (isListed(a)) { if (clean(copy(a, winOf(a))) === t) wraps.add(a); break; }
+    }
+  }
+  for (const p of kept) items.push(build(p.el, p.c, p.leaf, copyMore > 0, wraps.has(p.el)));
   const page = {path: clean(location.pathname).slice(0, 200), lang: clean(document.documentElement.lang).slice(0, 35),
     browser_lang: clean(navigator.language).slice(0, 35),
     viewport: {width: window.innerWidth, height: window.innerHeight}, scroll: {x: window.scrollX, y: window.scrollY},

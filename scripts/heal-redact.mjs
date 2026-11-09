@@ -36,10 +36,11 @@ export const INVENTORY_KEYS = new Set([
   // uniqueness, which is most of what `no_candidate_left` and `no_pick` were in the acceptance run.
   "pw_text", "pw_cut", "top_at_center",
   // copy_only: listed only because it holds copy (no hook, role or control tag made it a candidate); copy_cut: the probe left
-  // copy-holding elements out (its copy_more); for_attr: a label's `for`, the id of the control it names.
-  "copy_only", "copy_cut", "for_attr",
+  // copy-holding elements out (its copy_more); copy_wrap: its whole copy is that of a listed element inside it; for_attr: a
+  // label's `for`, the id of the control it names.
+  "copy_only", "copy_cut", "copy_wrap", "for_attr",
 ]);
-const BOOL_KEYS = new Set(["disabled", "hidden", "pw_cut", "top_at_center", "copy_only", "copy_cut"]); // true or false, nothing else
+const BOOL_KEYS = new Set(["disabled", "hidden", "pw_cut", "top_at_center", "copy_only", "copy_cut", "copy_wrap"]); // true or false, nothing else
 const DATA_KEY = /^data_[a-z0-9_]{1,60}$/;
 const DROP_KEY = /value|token|csrf|auth|session|secret|email|password|cookie|passcode|credential|bearer|api_?key|(^|_)(otp|pin|jwt|ssn|card|cvv|cvc|iban|heal)(_|$)/i; // `heal`: a marker this client sets must never be an inventory key
 const BOX_KEYS = ["x", "y", "width", "height"];
