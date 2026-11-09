@@ -67,6 +67,19 @@ test.describe("parseCapture", () => {
     expect(cap?.more).toBe(0);
     expect(parseCapture(JSON.stringify({ path: "/o", more: 1e12, inventory: [] }), BASE)?.more).toBe(1_000_000);
   });
+
+  test("keeps `copy_more` bounded like `more`, and 0 when it is missing or not a count @unit @security @regression", () => {
+    const parse = (copy_more: unknown) => parseCapture(JSON.stringify({ path: "/o", copy_more, inventory: [] }), BASE)?.copy_more;
+    expect(parse(3)).toBe(3);
+    expect(parse(1e12)).toBe(1_000_000);
+    for (const bad of [-1, 1.5, "7", null, 1e300, { x: 1 }, undefined]) expect(parse(bad), String(bad)).toBe(0);
+    expect(parseCapture(JSON.stringify({ path: "/o", inventory: [] }), BASE)?.copy_more).toBe(0);
+  });
+
+  test("keeps copy_only items of a capture, allowlisted again @unit @security @regression", () => {
+    const cap = parseCapture(JSON.stringify({ path: "/o", inventory: [{ tag: "p", text: "Saved", copy_only: true, copy_cut: true, value: "x" }] }), BASE);
+    expect(cap?.inventory).toEqual([{ ref: "e0", tag: "p", text: "Saved", copy_only: true, copy_cut: true }]);
+  });
 });
 
 test.describe("failuresOf", () => {
@@ -80,7 +93,46 @@ test.describe("failuresOf", () => {
   });
 });
 
+test.describe("capturePage", () => {
+  test("carries the probe's copy_more next to more, as a count @unit @regression", async () => {
+    const page = {
+      url: () => `${BASE}/orders`,
+      evaluate: async (): Promise<Record<string, unknown>> => ({ items: [{ tag: "p", text: "Saved", copy_only: true }], more: 2, copy_more: 5, page: {} }),
+      locator: () => ({ ariaSnapshot: async () => "- generic" }),
+      frames: () => [],
+    };
+    const cap = await capturePage(page as never, "(() => ({}))");
+    expect(cap.more).toBe(2);
+    expect(cap.copy_more).toBe(5);
+    expect(cap.inventory).toEqual([{ ref: "e0", tag: "p", text: "Saved", copy_only: true }]);
+    page.evaluate = async () => ({ items: [], more: 0, page: {} });
+    expect((await capturePage(page as never, "(() => ({}))")).copy_more).toBe(0);
+  });
+});
+
 test.describe("Healer with a capture", () => {
+  test("sends the capture's copy_more as inventory_copy_more, and the live snapshot's when there is no capture @unit @regression", async () => {
+    const root = makeProject();
+    const svc = new FakeService([reply("try", candidate(root, { ref: "e1" })), reply("healed", null)]);
+    const live = new FakeLive({}, "en", [{ ref: "e0", tag: "input" }]);
+    live.snap = { ...(await live.snapshot()), more: 1, copy_more: 4 };
+    const healer = new Healer(svc.client(), settingsFromEnv({ BASE_URL: BASE, HEAL_VISION: "off" }), new Verify(root, [true]).fn, { root, liveFactory: async () => live as never });
+    await healer.heal(failureFor(root));
+    const [plain] = svc.posts("/v1/heal");
+    expect(plain.page.inventory_more).toBe(1);
+    expect(plain.page.inventory_copy_more).toBe(4);
+
+    const svc2 = new FakeService([reply("try", candidate(root, { ref: "e1" })), reply("healed", null)]);
+    const live2 = new FakeLive({}, "en", [{ ref: "e0", tag: "input" }]);
+    live2.snap = { ...(await live2.snapshot()), more: 1, copy_more: 4 };
+    const capture = { path: "/login", more: 0, copy_more: 9, aria: "- generic", inventory: [{ ref: "e0", tag: "p", copy_only: true }, { ref: "e1", tag: "input" }] };
+    const healer2 = new Healer(svc2.client(), settingsFromEnv({ BASE_URL: BASE, HEAL_VISION: "off" }), new Verify(root, [true]).fn, { root, liveFactory: async () => live2 as never });
+    await healer2.heal({ ...failureFor(root), capture });
+    const [req] = svc2.posts("/v1/heal");
+    expect(req.page.inventory_more).toBe(0);
+    expect(req.page.inventory_copy_more).toBe(9);
+  });
+
   test("sends the failing page's listing and aria, checks against it, and sends no screenshot of another state @unit @regression", async () => {
     const root = makeProject();
     const svc = new FakeService([reply("try", candidate(root, { ref: "e1" })), reply("healed", null)]);

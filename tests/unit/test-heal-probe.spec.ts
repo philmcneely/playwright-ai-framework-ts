@@ -16,7 +16,7 @@ import path from "node:path";
 import { PROBE_SHA256, probeFunction, sha256, vendoredProbe } from "../../scripts/heal-probe.mjs";
 
 /** sha256 of the heal service's src/heal_service/probe/probe.js this copy was taken from. */
-const SERVICE_PROBE_SHA256 = "fca8dd814e18c2a5ff13f875c9c2cce86e2f23466cba15c20135aca25e645459";
+const SERVICE_PROBE_SHA256 = "387551efed7d48a172e7afeba94e152b5da03eaef92a5718fb7c022dcdc54a72";
 
 test.describe("vendored probe", { tag: ["@unit", "@security", "@regression"] }, () => {
   test("the file is the service's probe, byte for byte (sha256)", () => {

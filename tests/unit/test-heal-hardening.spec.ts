@@ -358,9 +358,19 @@ test.describe("the inventory keeps every fact the service reads", { tag: ["@unit
   test("they are still plain values: a non-string pw_text or a non-boolean flag is dropped", () => {
     expect(cleanInventory([{ tag: "a", pw_text: { x: 1 }, pw_cut: "yes", top_at_center: 1 }])[0]).toEqual({ tag: "a" });
   });
+  test("copy_only, copy_cut and for_attr survive the allowlist with their types, and a wrong type is dropped", () => {
+    const item = { tag: "p", text: "Order shipped", pw_text: "Order shipped", copy_only: true, copy_cut: false, for_attr: "email" };
+    expect(cleanInventory([item])[0]).toEqual(item);
+    expect(cleanInventory([{ tag: "p", copy_only: "yes", copy_cut: 1, for_attr: { x: 1 } }])[0]).toEqual({ tag: "p" });
+    expect(cleanInventory([{ tag: "label", for_attr: "x".repeat(900) }])[0].for_attr).toHaveLength(400);
+  });
+  test("a copy_only item is cleaned like any other: no value key, text capped", () => {
+    expect(cleanInventory([{ tag: "p", copy_only: true, text: "y".repeat(900), value: "hunter2", defaultValue: "z" }])[0]).toEqual({ tag: "p", copy_only: true, text: "y".repeat(400) });
+  });
   test("every key the vendored probe lists is sent", () => {
-    const probeKeys = ["tag", "type", "role", "name", "aria_label", "label", "placeholder", "id", "testid", "data_test", "data_qa", "data_cy", "class", "name_attr", "title", "alt", "text", "disabled", "hidden", "box", "row", "row_attr", "frame", "shadow", "top_at_center", "pw_text", "pw_cut"];
-    const full = Object.fromEntries(probeKeys.map((k) => [k, k === "box" ? { x: 1, y: 2, width: 3, height: 4 } : k === "disabled" || k === "hidden" || k === "pw_cut" || k === "top_at_center" ? true : "v"]));
+    const probeKeys = ["tag", "type", "role", "name", "aria_label", "label", "placeholder", "id", "testid", "data_test", "data_qa", "data_cy", "class", "name_attr", "title", "alt", "text", "disabled", "hidden", "box", "row", "row_attr", "frame", "shadow", "top_at_center", "pw_text", "pw_cut", "copy_only", "copy_cut", "for_attr"];
+    const bools = ["disabled", "hidden", "pw_cut", "top_at_center", "copy_only", "copy_cut"];
+    const full = Object.fromEntries(probeKeys.map((k) => [k, k === "box" ? { x: 1, y: 2, width: 3, height: 4 } : bools.includes(k) ? true : "v"]));
     expect(Object.keys(cleanInventory([full])[0]).sort()).toEqual(probeKeys.sort());
   });
 });

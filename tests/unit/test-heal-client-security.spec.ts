@@ -83,13 +83,14 @@ test.describe("typed values", { tag: ["@unit", "@security", "@regression"] }, ()
     const live = new LivePage(settingsFromEnv({ BASE_URL: "http://localhost:7080" }), "/login", "probe");
     live.page = {
       url: () => "http://localhost:7080/login?token=abc",
-      evaluate: async () => ({ items: [{ tag: "input", value: "hunter2" }], more: 0, page: { lang: "en" } }),
+      evaluate: async () => ({ items: [{ tag: "input", value: "hunter2" }], more: 0, copy_more: 3, page: { lang: "en" } }),
       locator: () => ({ ariaSnapshot: async () => '- textbox "Pw": hunter2\n' }),
     };
     const snap = await live.snapshot();
     expect(JSON.stringify(snap)).not.toContain("hunter2");
     expect(snap.inventory).toEqual([{ ref: "e0", tag: "input" }]);
     expect(snap.path).toBe("/login");
+    expect(snap.copy_more).toBe(3);
   });
 });
 

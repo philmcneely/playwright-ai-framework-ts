@@ -22,7 +22,9 @@ npm run heal -- [--grep <name>] [--max N] [--open-pr]
 2. For each failure reopen the failing route in a fresh Chromium (`HEAL_STORAGE_STATE` signs it in), run the **vendored page
    probe** (`scripts/heal-probe.js`) for the element inventory, read the aria snapshot and the language signals, and send
    one request to the service. When the failure carries a capture, its inventory and aria snapshot are sent instead of the
-   reopened page's (which has lost whatever the test had opened: a panel, a tab, a dialog). The request holds the stack's files under the source roots (with sha256), the inventory, the aria snapshot, the
+   reopened page's (which has lost whatever the test had opened: a panel, a tab, a dialog). The request holds the stack's files under the source roots (with sha256), the inventory (with the counts of
+   elements the probe left out for want of room: `inventory_more` for the listing, `inventory_copy_more` for elements that hold
+   only copy), the aria snapshot, the
    last green run's fingerprint and, with `HEAL_VISION=auto|on`, one masked screenshot.
 3. The service answers with a `try`: a candidate locator, the element it expects, and the patch. The client then
    - checks the candidate **in the live page** before it touches a file: it must match exactly one element, and that element
@@ -126,7 +128,8 @@ Every service reply is untrusted input.
   source roots (real path, no symlink), nothing overlaps, and the code written is the code that was checked live. Extra patches
   (other uses of the same locator) are each checked live too. The file is written atomically with its own mode and reverted on
   any failure; a partial multi-file write is rolled back.
-- **Nothing typed leaves the browser**: inventory entries are cut to an allowlist of keys on this side, the aria snapshot goes
+- **Nothing typed leaves the browser**: inventory entries are cut to an allowlist of keys on this side (the allowlist keeps
+  `copy_only`, an item listed only because it holds page copy, `copy_cut`, and a label's `for`), the aria snapshot goes
   through a redaction that removes typed values, and no cookie or storage state is sent.
 - **The probe is pinned**: `scripts/heal-probe.js` is a byte-identical copy of the service's probe (its sha256 is checked every
   time it is read and in `tests/unit/test-heal-probe.spec.ts`). Page requests to origins other than `BASE_URL` are aborted while

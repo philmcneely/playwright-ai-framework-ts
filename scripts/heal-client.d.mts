@@ -31,6 +31,7 @@ export interface Capture {
   path: string;
   inventory: Json[];
   more: number;
+  copy_more?: number;
   aria: string | null;
 }
 

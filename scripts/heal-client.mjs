@@ -349,6 +349,7 @@ export function buildRequest(failure, files, stack, snap, settings, root, lastPa
       language: snap.language,
       inventory: cleanInventory(snap.inventory),
       inventory_more: snap.more,
+      inventory_copy_more: snap.copy_more ?? 0,
       viewport: snap.viewport,
       screenshot,
     },
@@ -683,9 +684,11 @@ export const HEAL_CAPTURE_ATTACHMENT = "heal-page-capture";
 const CAPTURE_MAX_CHARS = 2_000_000;
 const CAPTURE_MAX_ITEMS = 500; // the probe's own cap
 const CAPTURE_MAX_MORE = 1_000_000;
+/** A probe's left-out count as a whole number the service accepts (it refuses a negative one); anything else is 0. */
+const probeCount = (v) => (Number.isSafeInteger(v) && v >= 0 ? Math.min(v, CAPTURE_MAX_MORE) : 0);
 const CAPTURE_TIMEOUT_MS = 5_000; // per failing test, at most
 
-/** The failing `page` as the test left it: {path, inventory, more, aria}. Called by the support fixture after the test. */
+/** The failing `page` as the test left it: {path, inventory, more, copy_more, aria}. Called by the support fixture after the test. */
 export async function capturePage(page, probe = vendoredProbe()) {
   const run = async () => {
     const data = (await page.evaluate(probeFunction(probe))) ?? {};
@@ -702,6 +705,7 @@ export async function capturePage(page, probe = vendoredProbe()) {
       path: new URL(page.url(), "http://base.invalid").pathname || "/",
       inventory: cleanInventory(items.map((item, i) => ({ ...item, ref: `e${i}` }))),
       more: Number(data.more) || 0,
+      copy_more: probeCount(data.copy_more),
       aria,
     };
   };
@@ -730,7 +734,8 @@ export function parseCapture(text, baseUrl) {
   const inventory = cleanInventory(items).map(({ ref: _ref, ...item }, i) => ({ ref: `e${i}`, ...item }));
   const aria = typeof raw.aria === "string" && raw.aria.length <= LIMITS.ariaChars ? redactTypedValues(raw.aria) : null;
   const more = Number.isSafeInteger(raw.more) && raw.more >= 0 ? Math.min(raw.more, CAPTURE_MAX_MORE) : 0;
-  return { path: new URL(route, "http://base.invalid").pathname, inventory, more, aria };
+  const copyMore = probeCount(raw.copy_more);
+  return { path: new URL(route, "http://base.invalid").pathname, inventory, more, copy_more: copyMore, aria };
 }
 
 /** A fresh Chromium on the failing route (HEAL_STORAGE_STATE when set). It stays open for the whole heal so each candidate
@@ -808,6 +813,7 @@ export class LivePage {
       path: new URL(this.page.url(), "http://base.invalid").pathname || "/",
       inventory: this.inventory,
       more: Number(data.more) || 0,
+      copy_more: probeCount(data.copy_more),
       aria,
       viewport: { w: view.width, h: view.height, dpr: meta.dpr },
       language: { html_lang: meta.lang || null, browser_locale: meta.browser_lang || null, content_language: header },
@@ -939,7 +945,7 @@ function withCapture(snap, capture, live, settings) {
     live.notes = [...(live.notes ?? []), "no screenshot sent: the listing is of the page at the failure, the screenshot would not be"];
   }
   const { scroll: _scroll, ...viewport } = snap.viewport ?? {};
-  return { ...snap, path: capture.path, inventory: capture.inventory, more: capture.more, aria: capture.aria, screenshot: null, viewport };
+  return { ...snap, path: capture.path, inventory: capture.inventory, more: capture.more, copy_more: capture.copy_more, aria: capture.aria, screenshot: null, viewport };
 }
 
 /** Heals one failing test at a time through the service. All collaborators are injected, so a test can drive the whole loop
