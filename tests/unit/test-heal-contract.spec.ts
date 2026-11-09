@@ -35,7 +35,7 @@ const json = (name: string, file: string): Json => JSON.parse(readFileSync(path.
 const SCHEMA: Record<string, string[]> = {
   top: ["client", "test", "failure", "source", "page", "last_pass", "options", "test_id_attribute", "run"],
   client: ["framework", "language", "version"], test: ["id", "title"], failure: ["error", "stack"], source: ["roots", "files"],
-  file: ["path", "sha256", "content"], page: ["url", "language", "aria_snapshot", "inventory", "inventory_more", "inventory_copy_more", "viewport", "screenshot"],
+  file: ["path", "sha256", "content"], page: ["url", "language", "aria_snapshot", "inventory", "inventory_more", "inventory_copy_more", "inventory_copy_withheld", "inventory_copy_withheld_data", "viewport", "screenshot"],
   language: ["html_lang", "browser_locale", "content_language"], options: ["vision", "max_rounds", "locale_branching"],
   run: ["id", "repo"], last_pass: ["fingerprint", "neighbours", "language"],
 };
@@ -174,7 +174,7 @@ test.describe("contract fixtures", { tag: ["@unit", "@contract", "@regression"] 
           language,
           notes: [] as string[],
           snapshot: async () => ({
-            path: page, inventory: req.page.inventory.map(toProbeItem), more: req.page.inventory_more ?? 0, copy_more: req.page.inventory_copy_more ?? 0, aria: req.page.aria_snapshot ?? "",
+            path: page, inventory: req.page.inventory.map(toProbeItem), more: req.page.inventory_more ?? 0, copy_more: req.page.inventory_copy_more ?? 0, copy_withheld: req.page.inventory_copy_withheld ?? 0, copy_withheld_data: req.page.inventory_copy_withheld_data ?? 0, aria: req.page.aria_snapshot ?? "",
             viewport: req.page.viewport ?? {}, language: req.page.language, screenshot: null,
           }),
           check: async (expression: string): Promise<[number | null, string | null]> => {

@@ -4,8 +4,8 @@ Page Probe (the element inventory a client collects and sends)
 ===============================================================================
 Run in the page as `page.evaluate(<this file>)` for the whole page, or as `locator.evaluate(<this file>)` to describe just
 that one element (a client uses that to check a healed locator against the element it expected). It returns
-{items, more, copy_more, page}: the elements a locator could hook on, and a small record of the page they came from. The service has
-no browser and never fetches a page, so this list is the only view of the page it ever gets: what is not in it cannot be
+{items, more, copy_more, copy_withheld, copy_withheld_data, page}: the elements a locator could hook on, and a small record
+of the page they came from. The service has no browser and never fetches a page, so this list is the only view of the page it ever gets: what is not in it cannot be
 matched, and what is in it is what it learns.
 
 What it reads is attributes and visible copy, never what a person typed. That is the line this file is written around:
@@ -31,6 +31,12 @@ Features:
       (a button's inner span). They fill only the room the others leave under MAX (never pushing one out), in page order;
       `copy_more` counts the copy-holding elements left out for want of room (and each copy_only item then says `copy_cut`),
       so the service never calls a text unique from a list that is missing some
+    ✓ `copy_withheld` counts the visible elements with copy of their own that the filters kept out of the listing (over 80
+      characters, an address, a long run of digits, a token-like word, or inside a control or a data widget), and
+      `copy_withheld_data` the ones inside a control or data widget (an option, a grid cell: short copy that can equal a
+      text locator's): the service cannot call a text unique from a listing that is missing copy that could match it
+    ✓ `text`, `name`, `label`, `aria_label`, `placeholder`, `title` and `alt` of every item are withheld when they hold an
+      address, a long run of digits (6 for a copy_only item, 9 otherwise; digits of any script) or a token-like word
     ✓ `copy_wrap`: the listed element's whole copy is that of a listed element inside it (said by the DOM), so a text locator
       matches the inner one, not this
     ✓ pw_text and a copy_only item's copy are withheld when they hold an address, a long run of digits (6 for a copy_only item,
@@ -91,9 +97,11 @@ Author: PMAC
   const ENTRY_ROLE = /(^|\s)(textbox|searchbox|combobox|spinbutton|slider)(?=\s|$)/i;
   // text that could be personal or a secret: an address, a long run of digits (a card, a phone), a token-like word. A copy_only
   // item is held to a shorter run (an OTP or a short code is 6 digits), and this is checked on pw_text of every item too
-  const SENSITIVE = /[^\s@]+@[^\s@]+\.[^\s@]+|(?:\d[ .-]?){9,}/;
-  const SENSITIVE_COPY = /[^\s@]+@[^\s@]+\.[^\s@]+|(?:\d[ .-]?){6,}/;
-  const tokenish = t => t.split(' ').some(w => w.length >= 24 && /\d/.test(w) && /[A-Za-z]/.test(w));
+  const SENSITIVE = /[^\s@]+@[^\s@]+\.[^\s@]+|(?:\p{Nd}[ .-]?){9,}/u;       // \p{Nd}: digits of any script
+  const SENSITIVE_COPY = /[^\s@]+@[^\s@]+\.[^\s@]+|(?:\p{Nd}[ .-]?){6,}/u;
+  const tokenish = t => t.split(' ').some(w => w.length >= 24 && /\p{Nd}/u.test(w) && /[A-Za-z]/.test(w));
+  // `s` unless it holds something the filters above withhold (a copy_only item is held to the shorter digit run)
+  const safe = (s, strict) => (s && ((strict ? SENSITIVE_COPY : SENSITIVE).test(s) || tokenish(s))) ? '' : s;
   const COPY_NODES = 1000;       // nodes one read of a copy looks at, whatever they hold
   const copy = (node, win, depth = 0, st = {n: 0}) => {
     let out = '';
@@ -170,15 +178,46 @@ Author: PMAC
   // The copy of a visible element that has a text node of its own and is not listed for another reason, else ''.
   const COPY_CHARS = 80;
   const hasOwnText = el => Array.from(el.childNodes).some(c => c.nodeType === 3 && c.nodeValue.trim());
+  let why = '';                       // why the last copyOf said '': 'data' (inside a control or a data widget), 'withheld', or ''
   const copyOf = el => {
+    why = '';
     if (!hasOwnText(el)) return '';
     const win = winOf(el), t = clean(copy(el, win));
-    if (!t || t.length > COPY_CHARS || SENSITIVE_COPY.test(t) || tokenish(t) || inEntry(el)) return '';
-    const r = el.getBoundingClientRect(), cs = win.getComputedStyle(el);
-    if (!(r.width && r.height) || cs.visibility === 'hidden' || cs.display === 'none') return '';
-    if (el.checkVisibility && !el.checkVisibility()) return '';             // e.g. inside a closed <details>
+    if (!t || !visibleBox(el) || (el.checkVisibility && !el.checkVisibility())) return '';     // also inside a closed <details>
+    if (inEntry(el)) { why = 'data'; return ''; }
+    if (t.length > COPY_CHARS || SENSITIVE_COPY.test(t) || tokenish(t)) { why = 'withheld'; return ''; }
     const p = el.parentElement;
-    return p && isListed(p) && clean(copy(p, win)) === t ? '' : t;       // the listed element around it already says it
+    return p && isListed(p) && copyText(p) === t ? '' : t;       // the listed element around it already says it
+  };
+  // The copy of an element, read once (a page of listed elements round one wrapper must not read it again for each of them)
+  const copyCache = new Map();
+  const copyText = el => {
+    let t = copyCache.get(el);
+    if (t === undefined) { t = clean(copy(el, winOf(el))); copyCache.set(el, t); }
+    return t;
+  };
+  const visibleBox = el => {
+    const r = el.getBoundingClientRect(), cs = winOf(el).getComputedStyle(el);
+    return !!(r.width && r.height) && cs.visibility !== 'hidden' && cs.display !== 'none';
+  };
+  // The listed element `inner` sits in when its whole copy is that of `inner` (a wrapper of one text), else null. A hidden
+  // inner element marks nothing: the snapshot and the count leave it out, so its wrapper still holds the text itself.
+  const wrapperOf = inner => {
+    const t = copyText(inner);
+    if (!t || !visibleBox(inner)) return null;
+    for (let a = up(inner), n = 0; a && n < 100; a = up(a), n++) {
+      if (isListed(a)) return copyText(a) === t ? a : null;
+    }
+    return null;
+  };
+  // does a listed element (or a copy_only one) inside `el` hold all of el's copy?
+  const wrapsItself = el => {
+    let n = 0;
+    for (const d of el.querySelectorAll('*')) {
+      if (++n > 2000) break;
+      if (!/^(script|style|template|noscript)$/i.test(d.tagName) && (isListed(d) || copyOf(d)) && wrapperOf(d) === el) return true;
+    }
+    return false;
   };
   const build = (el, c, leaf, cut, wrap) => {
     const win = winOf(el), {frame, shadow, ox, oy} = c;
@@ -200,6 +239,7 @@ Author: PMAC
       text, disabled: !!el.disabled || el.getAttribute('aria-disabled') === 'true',
       hidden, box: hidden || !(r.width > 0 && r.height > 0) ? null
         : {x: r.left + ox, y: r.top + oy, width: r.width, height: r.height}};
+    for (const k of ['text', 'name', 'label', 'aria_label', 'placeholder', 'title', 'alt']) item[k] = safe(item[k], leaf);
     if (leaf) { item.copy_only = true; if (cut) item.copy_cut = true; }
     if (wrap) item.copy_wrap = true;
     for (const n of el.getAttributeNames()) {
@@ -228,7 +268,7 @@ Author: PMAC
   // Page order, in one walk; what is listed is decided after it: every listed element first, then the copy_only ones in the
   // room that is left (never more than MAX in all).
   const queue = [{root: document, frame: '', shadow: [], ox: window.scrollX, oy: window.scrollY}];
-  const picks = []; let leaves = 0, lead = 0, copyMore = 0;
+  const picks = []; let leaves = 0, lead = 0, copyMore = 0, withheld = 0, withheldData = 0;
   while (queue.length) {
     const c = queue.shift(), {root, frame, shadow, ox, oy} = c;
     for (const el of root.querySelectorAll('*')) {
@@ -245,12 +285,16 @@ Author: PMAC
         } catch (_) { /* a cross-origin frame cannot be read from here */ }
       }
       if (describeOnly) {
-        if (el === only) items.push(build(el, c, !isListed(el) && !!copyOf(el), false, false));       // as the whole listing would say it
+        if (el === only) {
+          const leaf = !isListed(el) && !!copyOf(el);
+          items.push(build(el, c, leaf, false, wrapsItself(el)));
+        }       // as the whole listing would say it
       } else if (isListed(el)) {
         if (lead >= MAX) more++;
         else { lead++; picks.push({el, c, leaf: false}); }
       } else if (leaves < MAX) {                    // no room for more than MAX of them, whatever the rest of the page holds
         if (copyOf(el)) { leaves++; picks.push({el, c, leaf: true}); }
+        else if (why) { withheld++; if (why === 'data') withheldData++; }
       } else if (hasOwnText(el)) {
         copyMore++;                                 // past the limit it is not looked at: it may hold copy, so it is counted
       }
@@ -262,16 +306,11 @@ Author: PMAC
   // A listed element whose whole copy is that of a listed element inside it (a wrapper of one text): getByText matches the
   // inner one only. Said by the DOM, so a text drawn inside another's box is never taken for it.
   const wraps = new Set();
-  for (const p of kept) {
-    const t = clean(copy(p.el, winOf(p.el)));
-    for (let a = t ? up(p.el) : null, n = 0; a && n < 100; a = up(a), n++) {
-      if (isListed(a)) { if (clean(copy(a, winOf(a))) === t) wraps.add(a); break; }
-    }
-  }
+  for (const p of kept) { const w = wrapperOf(p.el); if (w) wraps.add(w); }
   for (const p of kept) items.push(build(p.el, p.c, p.leaf, copyMore > 0, wraps.has(p.el)));
   const page = {path: clean(location.pathname).slice(0, 200), lang: clean(document.documentElement.lang).slice(0, 35),
     browser_lang: clean(navigator.language).slice(0, 35),
     viewport: {width: window.innerWidth, height: window.innerHeight}, scroll: {x: window.scrollX, y: window.scrollY},
     dpr: window.devicePixelRatio};
-  return {items, more, copy_more: copyMore, page};
+  return {items, more, copy_more: copyMore, copy_withheld: withheld, copy_withheld_data: withheldData, page};
 }

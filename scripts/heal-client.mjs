@@ -350,6 +350,8 @@ export function buildRequest(failure, files, stack, snap, settings, root, lastPa
       inventory: cleanInventory(snap.inventory),
       inventory_more: snap.more,
       inventory_copy_more: probeCount(snap.copy_more),
+      inventory_copy_withheld: probeCount(snap.copy_withheld),
+      inventory_copy_withheld_data: probeCount(snap.copy_withheld_data),
       viewport: snap.viewport,
       screenshot,
     },
@@ -688,7 +690,7 @@ const CAPTURE_MAX_MORE = 1_000_000;
 const probeCount = (v) => (Number.isSafeInteger(v) && v >= 0 ? Math.min(v, CAPTURE_MAX_MORE) : 0);
 const CAPTURE_TIMEOUT_MS = 5_000; // per failing test, at most
 
-/** The failing `page` as the test left it: {path, inventory, more, copy_more, aria}. Called by the support fixture after the test. */
+/** The failing `page` as the test left it: {path, inventory, more, copy_more, copy_withheld, copy_withheld_data, aria}. Called by the support fixture after the test. */
 export async function capturePage(page, probe = vendoredProbe()) {
   const run = async () => {
     const data = (await page.evaluate(probeFunction(probe))) ?? {};
@@ -706,6 +708,8 @@ export async function capturePage(page, probe = vendoredProbe()) {
       inventory: cleanInventory(items.map((item, i) => ({ ...item, ref: `e${i}` }))),
       more: Number(data.more) || 0,
       copy_more: probeCount(data.copy_more),
+      copy_withheld: probeCount(data.copy_withheld),
+      copy_withheld_data: probeCount(data.copy_withheld_data),
       aria,
     };
   };
@@ -735,7 +739,10 @@ export function parseCapture(text, baseUrl) {
   const aria = typeof raw.aria === "string" && raw.aria.length <= LIMITS.ariaChars ? redactTypedValues(raw.aria) : null;
   const more = Number.isSafeInteger(raw.more) && raw.more >= 0 ? Math.min(raw.more, CAPTURE_MAX_MORE) : 0;
   const copyMore = probeCount(raw.copy_more);
-  return { path: new URL(route, "http://base.invalid").pathname, inventory, more, copy_more: copyMore, aria };
+  return {
+    path: new URL(route, "http://base.invalid").pathname, inventory, more, copy_more: copyMore,
+    copy_withheld: probeCount(raw.copy_withheld), copy_withheld_data: probeCount(raw.copy_withheld_data), aria,
+  };
 }
 
 /** A fresh Chromium on the failing route (HEAL_STORAGE_STATE when set). It stays open for the whole heal so each candidate
@@ -814,6 +821,8 @@ export class LivePage {
       inventory: this.inventory,
       more: Number(data.more) || 0,
       copy_more: probeCount(data.copy_more),
+      copy_withheld: probeCount(data.copy_withheld),
+      copy_withheld_data: probeCount(data.copy_withheld_data),
       aria,
       viewport: { w: view.width, h: view.height, dpr: meta.dpr },
       language: { html_lang: meta.lang || null, browser_locale: meta.browser_lang || null, content_language: header },
@@ -945,7 +954,10 @@ function withCapture(snap, capture, live, settings) {
     live.notes = [...(live.notes ?? []), "no screenshot sent: the listing is of the page at the failure, the screenshot would not be"];
   }
   const { scroll: _scroll, ...viewport } = snap.viewport ?? {};
-  return { ...snap, path: capture.path, inventory: capture.inventory, more: capture.more, copy_more: capture.copy_more, aria: capture.aria, screenshot: null, viewport };
+  return {
+    ...snap, path: capture.path, inventory: capture.inventory, more: capture.more, copy_more: capture.copy_more,
+    copy_withheld: capture.copy_withheld, copy_withheld_data: capture.copy_withheld_data, aria: capture.aria, screenshot: null, viewport,
+  };
 }
 
 /** Heals one failing test at a time through the service. All collaborators are injected, so a test can drive the whole loop

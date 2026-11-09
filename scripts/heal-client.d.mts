@@ -32,6 +32,9 @@ export interface Capture {
   inventory: Json[];
   more: number;
   copy_more?: number;
+  /** visible copy the probe's filters kept out of the listing, and of those the part inside a control or data widget */
+  copy_withheld?: number;
+  copy_withheld_data?: number;
   aria: string | null;
 }
 

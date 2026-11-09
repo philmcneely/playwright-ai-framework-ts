@@ -24,7 +24,8 @@ npm run heal -- [--grep <name>] [--max N] [--open-pr]
    one request to the service. When the failure carries a capture, its inventory and aria snapshot are sent instead of the
    reopened page's (which has lost whatever the test had opened: a panel, a tab, a dialog). The request holds the stack's files under the source roots (with sha256), the inventory (with the counts of
    elements the probe left out for want of room: `inventory_more` for the listing, `inventory_copy_more` for elements that hold
-   only copy), the aria snapshot, the
+   only copy; `inventory_copy_withheld` for visible copy the probe's filters kept out of the listing, and
+   `inventory_copy_withheld_data` for the part of it inside a control or data widget; each a whole number, at most 10^6), the aria snapshot, the
    last green run's fingerprint and, with `HEAL_VISION=auto|on`, one masked screenshot.
 3. The service answers with a `try`: a candidate locator, the element it expects, and the patch. The client then
    - checks the candidate **in the live page** before it touches a file: it must match exactly one element, and that element

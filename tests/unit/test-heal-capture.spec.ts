@@ -10,7 +10,7 @@
  */
 import { test, expect } from "@playwright/test";
 import { Healer, capturePage, matchRef, parseCapture, settingsFromEnv } from "../../scripts/heal-client.mjs";
-import { failuresOf } from "../../scripts/heal.mjs";
+import type { Capture } from "../../scripts/heal-client.mjs";import { failuresOf } from "../../scripts/heal.mjs";
 import { captureWanted } from "../../fixtures/heal-fingerprints.js";
 import { FakeLive, FakeService, Verify, candidate, failureFor, makeProject, reply } from "./heal-helpers.js";
 
@@ -76,6 +76,16 @@ test.describe("parseCapture", () => {
     expect(parseCapture(JSON.stringify({ path: "/o", inventory: [] }), BASE)?.copy_more).toBe(0);
   });
 
+  test("keeps copy_withheld and copy_withheld_data bounded like copy_more, and 0 for anything that is not a count @unit @security @regression", () => {
+    for (const key of ["copy_withheld", "copy_withheld_data"] as const) {
+      const parse = (v: unknown) => parseCapture(JSON.stringify({ path: "/o", [key]: v, inventory: [] }), BASE)?.[key];
+      expect(parse(3), key).toBe(3);
+      expect(parse(1e12), key).toBe(1_000_000);
+      for (const bad of [-1, 1.5, "7", null, true, false, 1e300, { x: 1 }, [2], undefined]) expect(parse(bad), `${key} ${JSON.stringify(bad)}`).toBe(0);
+      expect(parseCapture(JSON.stringify({ path: "/o", inventory: [] }), BASE)?.[key], key).toBe(0);
+    }
+  });
+
   test("keeps copy_only items of a capture, allowlisted again @unit @security @regression", () => {
     const cap = parseCapture(JSON.stringify({ path: "/o", inventory: [{ tag: "p", text: "Saved", copy_only: true, copy_cut: true, value: "x" }] }), BASE);
     expect(cap?.inventory).toEqual([{ ref: "e0", tag: "p", text: "Saved", copy_only: true, copy_cut: true }]);
@@ -108,6 +118,20 @@ test.describe("capturePage", () => {
     page.evaluate = async () => ({ items: [], more: 0, page: {} });
     expect((await capturePage(page as never, "(() => ({}))")).copy_more).toBe(0);
   });
+
+  test("carries copy_withheld and copy_withheld_data, clamped, and 0 for a value that is not a count @unit @regression", async () => {
+    const page = {
+      url: () => `${BASE}/orders`,
+      evaluate: async (): Promise<Record<string, unknown>> => ({ items: [], more: 0, copy_withheld: 6, copy_withheld_data: 2, page: {} }),
+      locator: () => ({ ariaSnapshot: async () => "- generic" }),
+      frames: () => [],
+    };
+    const cap = await capturePage(page as never, "(() => ({}))");
+    expect([cap.copy_withheld, cap.copy_withheld_data]).toEqual([6, 2]);
+    page.evaluate = async () => ({ items: [], more: 0, copy_withheld: 5e9, copy_withheld_data: true, page: {} });
+    const odd = await capturePage(page as never, "(() => ({}))");
+    expect([odd.copy_withheld, odd.copy_withheld_data]).toEqual([1_000_000, 0]);
+  });
 });
 
 test.describe("Healer with a capture", () => {
@@ -119,6 +143,27 @@ test.describe("Healer with a capture", () => {
     const healer = new Healer(svc.client(), settingsFromEnv({ BASE_URL: BASE, HEAL_VISION: "off" }), new Verify(root, [true]).fn, { root, liveFactory: async () => live as never });
     await healer.heal(failureFor(root));
     expect(svc.posts("/v1/heal")[0].page.inventory_copy_more).toBe(1_000_000);
+  });
+
+  test("sends copy_withheld and copy_withheld_data as inventory_copy_withheld(_data): clamped, from a capture or the live snapshot @unit @security @regression", async () => {
+    const root = makeProject();
+    const run = async (snapExtra: Record<string, unknown>, capture?: Capture) => {
+      const svc = new FakeService([reply("try", candidate(root, { ref: "e1" })), reply("healed", null)]);
+      const live = new FakeLive({}, "en", [{ ref: "e0", tag: "input" }]);
+      live.snap = { ...(await live.snapshot()), ...snapExtra };
+      const healer = new Healer(svc.client(), settingsFromEnv({ BASE_URL: BASE, HEAL_VISION: "off" }), new Verify(root, [true]).fn, { root, liveFactory: async () => live as never });
+      await healer.heal(capture ? { ...failureFor(root), capture } : failureFor(root));
+      return svc.posts("/v1/heal")[0].page;
+    };
+    const live = await run({ copy_withheld: 5, copy_withheld_data: 1 });
+    expect([live.inventory_copy_withheld, live.inventory_copy_withheld_data]).toEqual([5, 1]);
+    const huge = await run({ copy_withheld: 5e9, copy_withheld_data: -3 });
+    expect([huge.inventory_copy_withheld, huge.inventory_copy_withheld_data]).toEqual([1_000_000, 0]);
+    const none = await run({});
+    expect([none.inventory_copy_withheld, none.inventory_copy_withheld_data]).toEqual([0, 0]);
+    const cap = { path: "/login", more: 0, copy_withheld: 8, copy_withheld_data: 3, aria: "- generic", inventory: [{ ref: "e0", tag: "input" }] };
+    const captured = await run({ copy_withheld: 1, copy_withheld_data: 1 }, cap);
+    expect([captured.inventory_copy_withheld, captured.inventory_copy_withheld_data]).toEqual([8, 3]);
   });
 
   test("sends the capture's copy_more as inventory_copy_more, and the live snapshot's when there is no capture @unit @regression", async () => {
