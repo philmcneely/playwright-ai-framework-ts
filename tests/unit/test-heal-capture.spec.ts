@@ -111,6 +111,16 @@ test.describe("capturePage", () => {
 });
 
 test.describe("Healer with a capture", () => {
+  test("clamps inventory_copy_more to the service's 10**6 cap, whatever the snapshot holds @unit @security @regression", async () => {
+    const root = makeProject();
+    const svc = new FakeService([reply("try", candidate(root, { ref: "e1" })), reply("healed", null)]);
+    const live = new FakeLive({}, "en", [{ ref: "e0", tag: "input" }]);
+    live.snap = { ...(await live.snapshot()), copy_more: 5e9 };
+    const healer = new Healer(svc.client(), settingsFromEnv({ BASE_URL: BASE, HEAL_VISION: "off" }), new Verify(root, [true]).fn, { root, liveFactory: async () => live as never });
+    await healer.heal(failureFor(root));
+    expect(svc.posts("/v1/heal")[0].page.inventory_copy_more).toBe(1_000_000);
+  });
+
   test("sends the capture's copy_more as inventory_copy_more, and the live snapshot's when there is no capture @unit @regression", async () => {
     const root = makeProject();
     const svc = new FakeService([reply("try", candidate(root, { ref: "e1" })), reply("healed", null)]);

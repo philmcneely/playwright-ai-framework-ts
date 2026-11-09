@@ -349,7 +349,7 @@ export function buildRequest(failure, files, stack, snap, settings, root, lastPa
       language: snap.language,
       inventory: cleanInventory(snap.inventory),
       inventory_more: snap.more,
-      inventory_copy_more: snap.copy_more ?? 0,
+      inventory_copy_more: probeCount(snap.copy_more),
       viewport: snap.viewport,
       screenshot,
     },
