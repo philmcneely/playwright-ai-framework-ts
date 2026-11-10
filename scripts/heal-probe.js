@@ -165,9 +165,10 @@ Author: PMAC
   const isListed = el => el.matches(sel) || hasData(el) || clickable(el);
   // The next element up, across a shadow root to its host; bounded by the caller (a page can clobber parentElement).
   const up = n => { const p = n.parentNode; return p && p.nodeType === 11 ? p.host || null : p && p.nodeType === 1 ? p : null; };
-  // inside a form control, an editable region, a text-entry widget or a widget of rows of data (grid, list, tree): the text
-  // there can be typed, chosen or somebody's data. (An element with such a role is still listed itself, as a control.)
-  const DATA_ROLE = /(^|\s)(listbox|option|grid|gridcell|treegrid|tree|treeitem|table|row|cell)(?=\s|$)/i;
+  // inside a form control, an editable region, a text-entry widget or a widget of rows of data (grid, tree, table): the text
+  // there can be typed, chosen or somebody's data. (An element with such a role is still listed itself, as a control; the
+  // label of a custom list's option is page copy the person clicks, not data, so a listbox or option is not on the list.)
+  const DATA_ROLE = /(^|\s)(grid|gridcell|treegrid|tree|treeitem|table|row|cell)(?=\s|$)/i;
   const inEntry = el => {
     for (let p = el, n = 0; p && n < 100; p = up(p), n++) {
       if (VALUE_TAGS.test(p.tagName) || /^(option|optgroup|datalist)$/i.test(p.tagName) || p.isContentEditable
@@ -183,7 +184,14 @@ Author: PMAC
     why = '';
     if (!hasOwnText(el)) return '';
     const win = winOf(el), t = clean(copy(el, win));
-    if (!t || !visibleBox(el) || (el.checkVisibility && !el.checkVisibility())) return '';     // also inside a closed <details>
+    if (!t) return '';
+    if (!visibleBox(el)) {         // no box: hidden for good, or copy that is not drawn on its own but is on the page
+      const p = el.parentElement;
+      if (win.getComputedStyle(el).display === 'contents' && p && p.checkVisibility && p.checkVisibility()) why = 'withheld';
+      else if (/^(option|optgroup)$/i.test(el.tagName)) { const sl = el.closest('select'); if (sl && visibleBox(sl)) why = 'data'; }
+      return '';
+    }
+    if (el.checkVisibility && !el.checkVisibility()) return '';     // inside a closed <details>
     if (inEntry(el)) { why = 'data'; return ''; }
     if (t.length > COPY_CHARS || SENSITIVE_COPY.test(t) || tokenish(t)) { why = 'withheld'; return ''; }
     const p = el.parentElement;
