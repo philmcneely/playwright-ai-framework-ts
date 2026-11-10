@@ -56,6 +56,11 @@ export interface Decision {
   files?: string[];
   source?: string;
   notes?: string[];
+  /** the test's re-run failed at another locator after this kept heal (`file:line`) */
+  later_at?: string | null;
+  /** set on the last kept heal of a test that still fails later, with the reason in `still_failing_why` */
+  still_failing?: boolean;
+  still_failing_why?: string;
   [key: string]: unknown;
 }
 
@@ -148,11 +153,19 @@ export function pageLanguage(
   browserLocale?: string | null,
   contentLanguage?: string | null,
 ): string;
+/** A re-run's outcome: `failure` (the re-run's own, with its `location`) lets the client report a failure after the patched line. */
+export interface VerifyResult {
+  passed: boolean;
+  failure: Failure | null;
+}
 export class Healer {
   constructor(
     service: Pick<ServiceClient, "probeJs" | "heal" | "result">,
     settings: HealSettings,
-    verify: (failure: Failure, patched: { file: string; line: number | null }) => Promise<boolean> | boolean,
+    verify: (
+      failure: Failure,
+      patched: { file: string; line: number | null },
+    ) => Promise<boolean | VerifyResult> | boolean | VerifyResult,
     options?: {
       root?: string;
       liveFactory?: ((route: string, probe: string) => Promise<any> | any) | null;
@@ -160,9 +173,13 @@ export class Healer {
       writeFile?: (file: string, data: Buffer) => void;
       env?: Env;
       secondCheck?: ((expression: string, original: string) => unknown) | null;
+      /** where the revert-on-interrupt handlers are registered (default: process) and what ends the run (default: process.exit) */
+      signals?: Pick<NodeJS.EventEmitter, "on" | "off">;
+      exit?: (code: number) => void;
     },
   );
-  heal(failure: Failure): Promise<Decision>;
+  /** One heal. A heal kept because the test then failed at a different locator carries that failure as `later_failure`. */
+  heal(failure: Failure): Promise<Decision & { later_failure?: Failure }>;
 }
 export function runTotal(decisions: Array<{ usage?: Record<string, number> }>): {
   calls: number;

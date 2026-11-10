@@ -9,7 +9,15 @@ export interface SuiteRun {
 export type SuiteRunner = (options?: { grep?: string | null; file?: string | null; env?: Record<string, string | undefined> }) => SuiteRun;
 export function runSuite(options?: { grep?: string | null; file?: string | null; env?: Record<string, string | undefined> }): SuiteRun;
 export function failuresOf(report: Json | null, baseUrl?: string): Array<Failure & { file: string }>;
+export interface VerifyRun {
+  passed: boolean;
+  /** the re-run's own failure as failuresOf builds it; null when it passed or no report names the exact test */
+  failure: (Failure & { file: string }) | null;
+}
+export function verifyRun(failure: Failure & { file: string }, runner?: SuiteRunner, root?: string): VerifyRun;
 export function verifyPassed(failure: Failure & { file: string }, runner?: SuiteRunner, root?: string): boolean;
+/** extra heals of one test after a heal was kept because the test then failed at a different locator */
+export const MAX_LATER_ROUNDS: number;
 export function workingTreeDirty(): boolean;
 export function healFailures(
   fails: Array<Failure & { file: string }>,

@@ -132,14 +132,20 @@ export function failuresOf(report, baseUrl = settingsFromEnv().baseUrl) {
   return fails;
 }
 
-/** True only if the exact target test ran AND passed AND the run exited cleanly. An empty selection, a missing report or a
- * different test with a similar title is NOT a pass. */
-export function verifyPassed(failure, runner = runSuite, root = process.cwd()) {
+/** Re-runs the exact target test and says what happened: `passed` is true only if that test ran AND passed AND the run exited
+ * cleanly (an empty selection, a missing report or a different test with a similar title is NOT a pass); `failure` is the
+ * re-run's own failure as failuresOf builds it, or null when it passed or when no report names the exact test. */
+export function verifyRun(failure, runner = runSuite, root = process.cwd()) {
   const { code, report } = runner({ grep: escapeRe(failure.title), file: relative(root, failure.file) });
-  if (code !== 0 || !report) return false;
-  const ran = [...specsOf(report)].filter((s) => s.title === failure.title && resolve(s.file) === resolve(failure.file));
-  return ran.length > 0 && ran.every((s) => s.test.status === "expected" && (s.test.results ?? []).every((r) => r.status === "passed"));
+  if (!report) return { passed: false, failure: null };
+  const same = (title, file) => title === failure.title && resolve(file) === resolve(failure.file);
+  const ran = [...specsOf(report)].filter((s) => same(s.title, s.file));
+  const passed = code === 0 && ran.length > 0 && ran.every((s) => s.test.status === "expected" && (s.test.results ?? []).every((r) => r.status === "passed"));
+  return { passed, failure: passed ? null : (failuresOf(report).find((f) => same(f.title, f.file)) ?? null) };
 }
+
+/** True only if the exact target test ran AND passed AND the run exited cleanly (see verifyRun). */
+export const verifyPassed = (failure, runner = runSuite, root = process.cwd()) => verifyRun(failure, runner, root).passed;
 
 /** True if any tracked file has uncommitted changes. */
 export function workingTreeDirty() {
@@ -147,8 +153,14 @@ export function workingTreeDirty() {
 }
 
 // ---- deciding ------------------------------------------------------------------------------------------------------------
-/** One decision per failing test. Failures past `max` are recorded as needs_human, never dropped. A failure a previous heal
- * already fixed (a page object shared by several tests) is confirmed by re-running it, not healed twice. */
+// A kept heal can reveal the next broken locator of the same test (the heal's own line passes, the test then stops further on).
+// The next failure is healed too, up to this many extra rounds per test.
+export const MAX_LATER_ROUNDS = 3;
+
+/** One decision per heal. Failures past `max` are recorded as needs_human, never dropped. A failure a previous heal already
+ * fixed (a page object shared by several tests) is confirmed by re-running it, not healed twice. A heal the service kept because
+ * the test then failed at a different locator (`later_locator`) is followed by a heal of that next failure, each its own
+ * decision; if the chain ends with the test still failing, the last kept heal says so (`still_failing`). */
 export async function healFailures(fails, healer, max, verify = verifyPassed) {
   const decisions = [];
   const healed = [];
@@ -161,9 +173,38 @@ export async function healFailures(fails, healer, max, verify = verifyPassed) {
       });
       continue;
     }
-    const d = await healer.heal(f);
-    decisions.push(d);
-    if (d.outcome === "healed") healed.push(d);
+    let current = f;
+    let last = null; // the latest heal of this test that was kept while the test still failed
+    for (let extra = 0; ; extra++) {
+      let healedOne;
+      try {
+        healedOne = await healer.heal(current);
+      } catch (e) {
+        if (extra === 0) throw e;
+        // a chained round failed outright: the earlier kept heals stay, this round is recorded, the run goes on
+        healedOne = { test: current.title, outcome: "needs_human", reason: "chain_error", why: `the next round failed (${e?.name ?? "Error"}): ${String(e?.message ?? e).slice(0, 200)}` };
+      }
+      const { later_failure: next, ...d } = healedOne;
+      decisions.push(d);
+      if (d.outcome === "healed") healed.push(d);
+      if (last && d.outcome !== "healed") {
+        last.still_failing = true;
+        last.still_failing_why = `the test still fails later at ${last.later_at ?? "another line"}, and that was not healed (${d.reason ?? d.outcome}: ${d.why ?? "no reason given"})`;
+      }
+      if (d.outcome !== "healed" || !next) break; // not kept, or kept and the test passed: the chain is over
+      last = d;
+      if (d.reason !== "later_locator") {
+        d.still_failing = true;
+        d.still_failing_why = `the test still fails later at ${d.later_at ?? "another line"}`;
+        break;
+      }
+      if (extra >= MAX_LATER_ROUNDS) {
+        d.still_failing = true;
+        d.still_failing_why = `the test still fails later at ${d.later_at ?? "another line"}; the client stopped after ${MAX_LATER_ROUNDS} more rounds`;
+        break;
+      }
+      current = next;
+    }
   }
   for (const f of fails.slice(max)) {
     decisions.push({ test: f.title, outcome: "needs_human", reason: "beyond_max", why: `not attempted: beyond --max ${max}` });
@@ -171,7 +212,7 @@ export async function healFailures(fails, healer, max, verify = verifyPassed) {
   return decisions;
 }
 
-const PLAIN_KEYS = ["test", "outcome", "reason", "why", "heal_id", "rounds", "settled_at", "file", "from", "to", "source", "strategy", "tier_movement"];
+const PLAIN_KEYS = ["test", "outcome", "reason", "why", "heal_id", "rounds", "settled_at", "file", "from", "to", "source", "strategy", "tier_movement", "later_at", "still_failing_why"];
 
 /** A decision cut to known keys holding capped strings, plain numbers or string lists, whatever it was built from. */
 function plainDecision(d) {
@@ -182,6 +223,7 @@ function plainDecision(d) {
     else if (typeof v === "number" && Number.isFinite(v)) out[k] = v;
     else if (v === null) out[k] = null;
   }
+  if (d?.still_failing === true) out.still_failing = true;
   const u = d?.usage && typeof d.usage === "object" ? d.usage : {};
   out.usage = Object.fromEntries(["calls", "input_tokens", "output_tokens", "images"].map((k) => [k, Number.isFinite(Number(u[k])) ? Number(u[k]) : 0]));
   for (const k of ["files", "notes"]) if (Array.isArray(d?.[k])) out[k] = d[k].filter((x) => typeof x === "string").slice(0, 50).map((x) => x.slice(0, 300));
@@ -195,7 +237,8 @@ export function writeSummary(rawDecisions, started, runId, directory = null) {
   mkdirSync(dir, { recursive: true });
   const counts = Object.fromEntries(["healed", "needs_human", "not_drift"].map((k) => [k, decisions.filter((d) => d.outcome === k).length]));
   const summary = {
-    run_id: runId, started, finished: new Date().toISOString(), failures: decisions.length, counts, usage: runTotal(decisions), decisions,
+    run_id: runId, started, finished: new Date().toISOString(), failures: decisions.length, counts, still_failing: decisions.filter((d) => d.still_failing).length,
+    usage: runTotal(decisions), decisions,
   };
   const file = join(dir, "heal-summary.json");
   writeFileSync(`${file}.tmp`, JSON.stringify(summary, null, 2), "utf-8");
@@ -214,6 +257,7 @@ export function printDecisions(decisions, log = console.log) {
   for (const d of decisions) {
     if (d.outcome === "healed") {
       log(`  [healed] ${oneLine(d.test)}: ${oneLine(d.file)}: ${oneLine(d.from)} -> ${oneLine(d.to)}  (${tokens(d)})`);
+      if (d.still_failing) log(`      kept, but the test still fails later: ${oneLine(d.still_failing_why)}`);
     } else {
       log(`  [${oneLine(d.outcome, 20)}]${d.reason ? ` [${oneLine(d.reason, 80)}]` : ""} ${oneLine(d.test)}: ${oneLine(d.why)}  (${tokens(d)})`);
     }
@@ -260,8 +304,15 @@ export const commitLines = (healed) => healed.map((d) => `- ${oneLine(d.test, 20
 
 /** The PR description. Every string that came from the service or the test run is escaped. */
 export function buildPrBody(healed, other) {
-  let body = "Automated locator healing (out-of-band).\n\n## Healed (locators only, intent preserved)\n";
-  body += healed.map((d) => `- **${mdEscape(d.test)}** -- ${mdCode(d.from)} -> ${mdCode(d.to)} (${mdCode(d.why || d.source)})`).join("\n");
+  const line = (d) => `- **${mdEscape(d.test)}** -- ${mdCode(d.from)} -> ${mdCode(d.to)} (${mdCode(d.why || d.source)})`;
+  const partial = healed.filter((d) => d.still_failing);
+  const clean = healed.filter((d) => !d.still_failing);
+  let body = "Automated locator healing (out-of-band).\n";
+  if (clean.length) body += "\n## Healed (locators only, intent preserved)\n" + clean.map(line).join("\n");
+  if (partial.length) {
+    // the heal's own line passes, the test then stops somewhere else: a human must look at what is left
+    body += "\n\n## Kept, test still fails later (review these)\n" + partial.map((d) => `${line(d)}\n  - ${mdCode(d.still_failing_why)}`).join("\n");
+  }
   if (other.length) {
     body += "\n\n## Needs human review (not touched)\n" + other.map((d) => `- **${mdEscape(d.test)}** -- ${mdCode(d.why)}`).join("\n");
   }
@@ -331,7 +382,7 @@ export async function main(argv = process.argv.slice(2)) {
   }
   console.log(`[heal] ${fails.length} failing test(s).`);
 
-  const healer = new Healer(new ServiceClient(settings.url, settings.token), settings, (f) => verifyPassed(f), {
+  const healer = new Healer(new ServiceClient(settings.url, settings.token), settings, (f) => verifyRun(f), {
     runId,
     // the framework's own second check on every locator the service writes (the AST validator is the first)
     secondCheck: (expression, original) => {
@@ -346,7 +397,8 @@ export async function main(argv = process.argv.slice(2)) {
   const healed = decisions.filter((d) => d.outcome === "healed");
   const other = decisions.filter((d) => d.outcome !== "healed");
   if (args.openPr && healed.length > 0) openPr(healed, other);
-  console.log(`\n[heal] done: ${healed.length} healed, ${other.length} for human review. Summary: ${summary}`);
+  const partial = healed.filter((d) => d.still_failing).length;
+  console.log(`\n[heal] done: ${healed.length} healed${partial ? ` (${partial} kept while the test still fails later)` : ""}, ${other.length} for human review. Summary: ${summary}`);
 }
 
 // run only when this file is the script (not when a test imports it); `import.meta` stays out so the Playwright runner can load it
