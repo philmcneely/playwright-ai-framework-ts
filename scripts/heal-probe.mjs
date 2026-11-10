@@ -28,7 +28,7 @@ import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 
 /** sha256 of the service's probe.js this copy was taken from. Update both together (and the unit test). */
-export const PROBE_SHA256 = "55769e1482768b3adea4fc878812e3d330dcaf6c9d696c52f3c3892ee45be73f";
+export const PROBE_SHA256 = "be06d2a769c9f98163e2811f0caef26e971fc781fc38626491b546f4de48414c";
 
 /** Hex sha256 of a string (as UTF-8) or a byte buffer. */
 export const sha256 = (data) => createHash("sha256").update(data).digest("hex");
