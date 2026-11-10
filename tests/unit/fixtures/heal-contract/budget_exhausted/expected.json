@@ -1,0 +1,122 @@
+{
+  "python": [
+    {
+      "status": "try",
+      "round": 1,
+      "reason": null,
+      "settled_at": 3,
+      "ended_at": null,
+      "cache_hit": false,
+      "usage": {
+        "calls": 1,
+        "input_tokens": 100,
+        "output_tokens": 8
+      },
+      "candidate": {
+        "target_ref": "e0",
+        "strategy": "test_id",
+        "tier": "testid",
+        "tier_movement": "up",
+        "below_floor": false,
+        "locator": {
+          "kind": "test_id",
+          "chain": [
+            {
+              "m": "get_by_test_id",
+              "a": [
+                "login-user"
+              ],
+              "o": {},
+              "p": false
+            }
+          ]
+        },
+        "code": "self.page.get_by_test_id(\"login-user\")",
+        "branches": null,
+        "expect": {
+          "count": 1,
+          "ref": "e0"
+        },
+        "patch": {
+          "file": "pages/account_page.py",
+          "from": "self.page.locator('#username')",
+          "to": "self.page.get_by_test_id(\"login-user\")"
+        },
+        "also_patches": []
+      }
+    },
+    {
+      "status": "needs_human",
+      "round": 1,
+      "reason": "budget_exhausted",
+      "settled_at": null,
+      "ended_at": 3,
+      "cache_hit": false,
+      "usage": {
+        "calls": 1,
+        "input_tokens": 100,
+        "output_tokens": 8
+      }
+    }
+  ],
+  "typescript": [
+    {
+      "status": "try",
+      "round": 1,
+      "reason": null,
+      "settled_at": 3,
+      "ended_at": null,
+      "cache_hit": false,
+      "usage": {
+        "calls": 1,
+        "input_tokens": 100,
+        "output_tokens": 8
+      },
+      "candidate": {
+        "target_ref": "e0",
+        "strategy": "test_id",
+        "tier": "testid",
+        "tier_movement": "up",
+        "below_floor": false,
+        "locator": {
+          "kind": "test_id",
+          "chain": [
+            {
+              "m": "getByTestId",
+              "a": [
+                "login-user"
+              ],
+              "o": {},
+              "p": false
+            }
+          ]
+        },
+        "code": "this.page.getByTestId('login-user')",
+        "branches": null,
+        "expect": {
+          "count": 1,
+          "ref": "e0"
+        },
+        "patch": {
+          "file": "pages/account-page.ts",
+          "from": "this.page.locator('#username')",
+          "to": "this.page.getByTestId('login-user')"
+        },
+        "also_patches": []
+      }
+    },
+    {
+      "status": "needs_human",
+      "round": 1,
+      "reason": "budget_exhausted",
+      "settled_at": null,
+      "ended_at": 3,
+      "cache_hit": false,
+      "usage": {
+        "calls": 1,
+        "input_tokens": 100,
+        "output_tokens": 8
+      }
+    }
+  ]
+}

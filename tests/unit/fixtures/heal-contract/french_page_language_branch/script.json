@@ -1,0 +1,21 @@
+{
+  "description": "The page is now French and the checkbox has no attribute at all, so its only locator is copy and the same-element match has no name to compare. A text pick finds it. The service does not translate: it keeps the English locator and adds the French one, selected by the page language.",
+  "model": [
+    {
+      "reply": "{\"ref\": \"e1\", \"why\": \"scripted pick\"}",
+      "usage": [
+        100,
+        8
+      ]
+    }
+  ],
+  "results": [
+    {
+      "count": 1,
+      "hit": {
+        "ref": "e1"
+      },
+      "test_outcome": "passed"
+    }
+  ]
+}

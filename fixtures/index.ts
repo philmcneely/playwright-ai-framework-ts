@@ -4,6 +4,7 @@ import { NetworkMocker } from "../utils/network-mocking.js";
 import { VisualRegression } from "../utils/visual-regression.js";
 import { APICapture } from "../utils/api-capture.js";
 import { getUnstableTests } from "../utils/stability-index.js";
+import { healSupport } from "./heal-fingerprints.js";
 import {
   ApiSeeder,
   CleanupRegistry,
@@ -20,6 +21,7 @@ type Fixtures = {
   cleanup: CleanupRegistry;
   apiSeed: ApiSeeder;
   dbSeed: DbSeeder;
+  healSupport: void;
 };
 
 export const test = base.extend<Fixtures>({
@@ -38,6 +40,9 @@ export const test = base.extend<Fixtures>({
     const vr = new VisualRegression(page);
     await use(vr);
   },
+
+  // Heal service support: opt-in fingerprints (HEAL_FINGERPRINTS=on), page language, failing route.
+  healSupport: [healSupport, { auto: true }],
 
   // Tracks created entities; deletes them (newest first) after the test, even on failure.
   // eslint-disable-next-line no-empty-pattern

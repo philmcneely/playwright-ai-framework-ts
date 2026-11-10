@@ -1,0 +1,21 @@
+{
+  "description": "The button's visible text changed from 'Sign in' to 'Log in', so a role+name locator broke. A text pick finds the button; its id is a better locator than either wording, so the heal moves up a tier and is not a copy locator.",
+  "model": [
+    {
+      "reply": "{\"ref\": \"e2\", \"why\": \"scripted pick\"}",
+      "usage": [
+        100,
+        8
+      ]
+    }
+  ],
+  "results": [
+    {
+      "count": 1,
+      "hit": {
+        "ref": "e2"
+      },
+      "test_outcome": "passed"
+    }
+  ]
+}

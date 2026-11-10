@@ -1,12 +1,12 @@
 # Using the AI test agents & the heal CLI
 
-There are two ways to put a model to work in this framework. Pick by whether you
-want a model **in an interactive loop** (authoring/triage) or a **headless,
-pick-any-model call** (CI / nightly automation).
+There are two ways to put a model to work on this framework. Pick by whether you
+want a model **in an interactive loop** (authoring/triage) or **headless healing
+through a heal service** (CI / nightly automation).
 
 | | Path 1 — Claude Code + MCP agents | Path 2 — the `heal` CLI |
 |---|---|---|
-| Model | the agent loop host (Claude; or opencode/codex → any model) | any OpenAI-compatible endpoint (OpenRouter / local / self-hosted) |
+| Model | the agent loop host (Claude; or opencode/codex → any model) | none here: the heal service owns the model calls and the healing rules |
 | Needs | Claude Code (or another loop host) | just Node — no Claude Code |
 | Best for | authoring tests, judgment-heavy healing | CI / nightly / unattended healing |
 
@@ -45,44 +45,35 @@ The agents are just Markdown prompts + MCP tools; the loop host supplies the mod
 
 ---
 
-## Path 2 — the `heal` CLI (headless, any model)
+## Path 2 — the `heal` CLI (headless, through the heal service)
 
 `scripts/heal.mjs` (`npm run heal`) is the out-of-band healer — the engine the
-overnight job uses, and usable on demand. **No Claude Code required**; it makes a
-direct call to whatever model you point it at.
+overnight job uses, and usable on demand. **No Claude Code required**, and no model
+is configured in this repository: the CLI is a client of a **heal service**, which
+owns the model calls and the healing rules.
 
 ```bash
 BASE_URL=<app-url> \
-HEAL_BASE_URL=<openai-compatible endpoint> \
-HEAL_MODEL=<model id> \
-[HEAL_API_KEY=<key>] \
+HEAL_SERVICE_URL=<heal service, e.g. http://localhost:8765> \
+[HEAL_SERVICE_TOKEN=<token>] \
 npm run heal -- [--grep <name>] [--max N] [--open-pr]
 ```
 
-What it does, per failing test: run the suite → take the **page snapshot Playwright
-captured at the moment of failure** (so stateful pages are grounded in the real
-state) → ask `HEAL_MODEL` for a resilient semantic locator → apply it to the one
-exact `page.locator()` / `page.getBy*()` call that failed → **re-run to verify**.
-A failure it can't make pass is reverted and flagged for a human.
+What it does, per failing test: run the suite → reopen the failing route and collect the
+live page's element inventory, accessibility snapshot and language signals (plus the
+last green run's fingerprint, when `HEAL_FINGERPRINTS=on` recorded one) → send that
+evidence to the service → **check each locator it returns in the live page** (exactly
+one match, the expected element) → apply it to the one exact `page.locator()` /
+`page.getBy*()` expression that failed → **re-run the exact test to verify**. A failure
+it can't make pass is reverted and flagged for a human.
 
-Guard rails: the model reply is untrusted and is accepted only as a single
-literal-argument locator call on the same receiver (anything else is rejected);
-ambiguous matches (identical locators in several places with no unique failure
-location) are left for a human; only locators written as direct
-`page.locator(...)`/`page.getBy*(...)` calls are healable, and dynamic locators
-are reported, not guessed.
-
-**Model examples (the "hook up any model" knob):**
-```bash
-# Self-hosted OpenAI-compatible gateway/proxy
-HEAL_BASE_URL=http://localhost:3025/v1 HEAL_MODEL='<model-name>' npm run heal
-
-# OpenRouter
-HEAL_BASE_URL=https://openrouter.ai/api/v1 HEAL_MODEL='anthropic/claude-...' HEAL_API_KEY=sk-or-... npm run heal
-
-# Local Ollama (OpenAI-compatible endpoint)
-HEAL_BASE_URL=http://localhost:11434/v1 HEAL_MODEL='qwen3:8b' npm run heal
-```
+Guard rails: everything the service returns is untrusted and accepted only as a single
+clean locator expression (approved Playwright calls, literal arguments, same receiver),
+on a span that is exactly one expression of the file, in a file the CLI sent, whose hash
+has not changed; ambiguous matches are left for a human, and dynamic locators are
+reported, not guessed. Details, the other settings (`HEAL_VISION`, `HEAL_MASK`,
+`HEAL_SOURCE_ROOTS`, `HEAL_STORAGE_STATE`, ...) and the limits are in
+[HEAL.md](HEAL.md).
 
 **Flags:**
 - `--grep <name>` — scope to matching tests.
@@ -90,6 +81,9 @@ HEAL_BASE_URL=http://localhost:11434/v1 HEAL_MODEL='qwen3:8b' npm run heal
 - `--open-pr` — needs `git` and the `gh` CLI and a **clean worktree**. If at least
   one heal succeeded, commits **only the healed files** on a new branch and opens
   one PR listing the heals and the failures (within `--max`) left for a human.
+
+Every decision is printed with its token usage and a run total, and the run's
+`heal-summary.json` is written into `test_artifacts/`.
 
 ---
 

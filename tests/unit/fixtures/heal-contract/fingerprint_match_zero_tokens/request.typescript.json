@@ -1,0 +1,116 @@
+{
+  "client": {
+    "framework": "example-framework",
+    "language": "typescript",
+    "version": "1.0.0"
+  },
+  "test": {
+    "id": "tests/test_account.spec.ts::save",
+    "title": "saves the account"
+  },
+  "failure": {
+    "error": "Error: locator.fill: Test timeout of 30000ms exceeded.\nCall log:\n  - waiting for locator('#username')\n",
+    "stack": [
+      {
+        "file": "pages/account-page.ts",
+        "line": 5
+      }
+    ]
+  },
+  "source": {
+    "roots": [
+      "pages"
+    ],
+    "files": [
+      {
+        "path": "pages/account-page.ts",
+        "content": "export class AccountPage {\n  constructor(private page: Page) {}\n\n  async save(name: string) {\n    await this.page.locator('#username').fill(name);\n  }\n}\n"
+      }
+    ]
+  },
+  "page": {
+    "url": "http://app.example/account",
+    "language": {
+      "html_lang": "en",
+      "browser_locale": "en-US"
+    },
+    "inventory": [
+      {
+        "tag": "input",
+        "type": "text",
+        "role": "textbox",
+        "name": "Username",
+        "label": "Username",
+        "box": {
+          "x": 10,
+          "y": 10,
+          "w": 200,
+          "h": 30
+        },
+        "attrs": {
+          "id": "user-name",
+          "data-testid": "login-user",
+          "name": "user"
+        }
+      },
+      {
+        "tag": "input",
+        "type": "password",
+        "label": "Password",
+        "box": {
+          "x": 10,
+          "y": 90,
+          "w": 200,
+          "h": 30
+        },
+        "attrs": {
+          "id": "pwd",
+          "name": "pwd"
+        }
+      },
+      {
+        "tag": "button",
+        "name": "Log in",
+        "text": "Log in",
+        "box": {
+          "x": 10,
+          "y": 130,
+          "w": 200,
+          "h": 30
+        },
+        "attrs": {
+          "id": "go"
+        }
+      }
+    ]
+  },
+  "options": {
+    "max_rounds": 3
+  },
+  "test_id_attribute": "data-testid",
+  "run": {
+    "id": "contract-fingerprint_match_zero_tokens",
+    "repo": "example-app"
+  },
+  "last_pass": {
+    "fingerprint": {
+      "tag": "input",
+      "type": "text",
+      "role": "textbox",
+      "name": "Username",
+      "label": "Username",
+      "box": {
+        "x": 10,
+        "y": 10,
+        "w": 200,
+        "h": 30
+      },
+      "attrs": {
+        "id": "username",
+        "data-testid": "login-user",
+        "name": "user"
+      }
+    },
+    "language": "en"
+  }
+}

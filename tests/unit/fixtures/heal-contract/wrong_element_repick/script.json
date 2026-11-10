@@ -1,0 +1,35 @@
+{
+  "description": "The client reports that the written locator hit a different element than the one expected. That pick is ruled out and the model is asked again; the second pick is verified.",
+  "model": [
+    {
+      "reply": "{\"ref\": \"e0\", \"why\": \"scripted pick\"}",
+      "usage": [
+        100,
+        8
+      ]
+    },
+    {
+      "reply": "{\"ref\": \"e1\", \"why\": \"scripted pick\"}",
+      "usage": [
+        100,
+        8
+      ]
+    }
+  ],
+  "results": [
+    {
+      "count": 1,
+      "hit": {
+        "ref": "e1"
+      },
+      "test_outcome": "passed"
+    },
+    {
+      "count": 1,
+      "hit": {
+        "ref": "e1"
+      },
+      "test_outcome": "passed"
+    }
+  ]
+}

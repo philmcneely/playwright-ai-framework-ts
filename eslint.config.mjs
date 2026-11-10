@@ -10,6 +10,8 @@ export default tseslint.config(
       "playwright-report/",
       "results/",
       "test-results/",
+      // a byte-identical copy of the heal service's in-page script; it must not be edited (see test-heal-probe.spec.ts)
+      "scripts/heal-probe.js",
     ],
   },
   js.configs.recommended,
@@ -32,6 +34,9 @@ export default tseslint.config(
         fetch: "readonly",
         URL: "readonly",
         setTimeout: "readonly",
+        Buffer: "readonly",
+        TextDecoder: "readonly",
+        AbortSignal: "readonly",
       },
     },
   },
