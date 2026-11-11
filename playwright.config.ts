@@ -6,6 +6,9 @@ import { ZAPIntegration } from "./utils/zap-integration.js";
 // Route traffic through OWASP ZAP when ZAP_ENABLED=true (QA-24).
 const zap = new ZAPIntegration();
 const zapProxy = zap.getBrowserProxyConfig().proxy;
+// On CI the log shows failures only and the HTML / JUnit reports keep only unexpected, flaky and interrupted tests;
+// locally the progress list and full reports stay.
+const ci = Boolean(process.env.CI);
 
 export default defineConfig({
   testDir: "./tests",
@@ -20,9 +23,9 @@ export default defineConfig({
     ["./utils/jira-reporter.ts"],
     ["./utils/observability-reporter.ts"],
     ["./utils/stability-reporter.ts"],
-    ["list"],
-    ["html", { outputFolder: "results/html", open: "never" }],
-    ["junit", { outputFile: "results/junit.xml" }],
+    ci ? ["failures"] : ["list"],
+    ["html", { outputFolder: "results/html", open: "never", onlyFailures: ci }],
+    ["junit", { outputFile: "results/junit.xml", onlyFailures: ci }],
     ["json", { outputFile: "results/results.json" }],
     ["allure-playwright", { resultsDir: "results/allure" }],
   ],
@@ -36,6 +39,7 @@ export default defineConfig({
     // ZAP re-signs HTTPS with its own CA, which the test browser does not trust.
     ...(zapProxy ? { proxy: zapProxy, ignoreHTTPSErrors: true } : {}),
   },
+  // A plain `playwright test` runs chromium; `--project=firefox` picks one, `--project="*"` runs all three.
   projects: [
     {
       name: "chromium",
@@ -44,10 +48,12 @@ export default defineConfig({
     {
       name: "firefox",
       use: { ...devices["Desktop Firefox"] },
+      default: false,
     },
     {
       name: "webkit",
       use: { ...devices["Desktop Safari"] },
+      default: false,
     },
     ...(isBrowserStackEnabled()
       ? [{
