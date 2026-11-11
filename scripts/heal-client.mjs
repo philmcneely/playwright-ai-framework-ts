@@ -964,7 +964,7 @@ function withCapture(snap, capture, live, settings) {
  * with a fake service and a fake page: `verify(failure)` re-runs the exact test, `liveFactory(route, probe)` opens the page. */
 export class Healer {
   constructor(service, settings, verify, { root = process.cwd(), liveFactory = null, runId = null, writeFile = replaceFile,
-    env = process.env, secondCheck = null } = {}) {
+    env = process.env, secondCheck = null, signals = process, exit = (code) => process.exit(code) } = {}) {
     this.service = service;
     this.settings = settings;
     this.verify = verify;
@@ -973,6 +973,8 @@ export class Healer {
     this.runId = runId ?? randomBytes(6).toString("hex");
     this.writeFile = writeFile;
     this.env = env;
+    this.signals = signals; // where the interrupt handlers go (process; a test passes an emitter)
+    this.exit = exit;
     this.secondCheck = secondCheck; // (expression, original) => truthy: an independent validator every written locator must pass
   }
 
@@ -1003,6 +1005,7 @@ export class Healer {
     const live = await this.liveFactory(route, probe);
     let resp;
     let kept = [];
+    let later = null; // the re-run's failure, when the heal was kept because the test then failed at a different locator
     let notes = [];
     try {
       let snap = await live.snapshot();
@@ -1017,7 +1020,7 @@ export class Healer {
           break;
         }
         rounds += 1;
-        [resp, kept] = await this.tryCandidate(failure, resp, live, sent, live.language);
+        [resp, kept, later] = await this.tryCandidate(failure, resp, live, sent, live.language);
         if (kept.length) break; // healed: nothing more is asked or checked
       }
     } finally {
@@ -1025,6 +1028,10 @@ export class Healer {
     }
     const decision = this.decision(resp, kept);
     if (notes.length) decision.notes = notes;
+    if (later && decision.outcome === "healed") {
+      decision.later_failure = later; // heal.mjs heals it next and drops it from the decision
+      decision.later_at = this.laterAt(later);
+    }
     return decision;
   }
 
@@ -1040,8 +1047,9 @@ export class Healer {
     return { ...lp, _page: store.entries[key].page || "/" };
   }
 
-  /** One candidate: check it live, apply it, re-run the exact test, report. Returns [the service's next answer, the files kept]
-   * (non-empty only when the service confirmed `healed`). */
+  /** One candidate: check it live, apply it, re-run the exact test, report. Returns [the service's next answer, the files kept,
+   * the failure the re-run ended on]; the files are non-empty only when the service confirmed `healed`, the failure is set
+   * only when they were kept for a later failure. */
   async tryCandidate(failure, resp, live, sent, language) {
     const cand = checkedCandidate(resp);
     const healId = resp.heal_id;
@@ -1082,20 +1090,72 @@ export class Healer {
       return [{ ...resp, status: "needs_human", reason: "patch_refused", why: `the client refused the patch: ${e.reason}` }, []];
     }
     planned.ref = ref; // the inventory entry the live check saw
-    let next;
-    let passed;
+    const release = this.revertOnSignal(planned); // the edit is on disk from the write until the service has answered
     try {
-      writeFiles(this.root, planned, this.writeFile); // inside the try: a partial multi-file write is reverted
-      passed = Boolean(await this.verify(failure, { file: planned.main.file, line: planned.main.line })); // where the patch is, in the patched file
-      if (!passed) revertFiles(this.root, planned, this.writeFile);
-      next = await this.report(healId, { count: 1, hit: { ref }, test_outcome: passed ? "passed" : "failed" });
-    } catch (e) {
-      revertFiles(this.root, planned, this.writeFile); // a write or verify crash or a lost service: never keep the edit
-      throw e;
+      let next;
+      let passed;
+      let later = null;
+      let report;
+      try {
+        writeFiles(this.root, planned, this.writeFile); // inside the try: a partial multi-file write is reverted
+        // a verify that only says pass/fail (a bool) never reports a later failure
+        const run = await this.verify(failure, { file: planned.main.file, line: planned.main.line }); // where the patch is, in the patched file
+        passed = Boolean(run && typeof run === "object" ? run.passed : run);
+        const reran = !passed && run && typeof run === "object" ? run.failure : null;
+        const laterReport = reran ? this.laterReport(reran, planned) : null;
+        if (laterReport) {
+          later = reran;
+          report = { count: 1, hit: { ref }, test_outcome: "failed_later", later: laterReport }; // the edit stays until the service has judged it
+        } else {
+          if (!passed) revertFiles(this.root, planned, this.writeFile);
+          report = { count: 1, hit: { ref }, test_outcome: passed ? "passed" : "failed" };
+        }
+        next = await this.report(healId, report);
+      } catch (e) {
+        revertFiles(this.root, planned, this.writeFile); // a write or verify crash or a lost service: never keep the edit
+        throw e;
+      }
+      if ((passed || later) && next.status === "healed") return [next, planned, later];
+      if (passed || later) revertFiles(this.root, planned, this.writeFile); // the service did not confirm it: do not keep it
+      return [next, [], null];
+    } finally {
+      release();
     }
-    if (passed && next.status === "healed") return [next, planned];
-    if (passed) revertFiles(this.root, planned, this.writeFile); // the service did not confirm it: do not keep it
-    return [next, []];
+  }
+
+  /** While a patch is on disk and unjudged, an interrupt (Ctrl-C, kill, a closed terminal) puts the files back and exits non-zero:
+   * a possibly wrong edit is never left behind. Returns the function that removes the handlers. */
+  revertOnSignal(planned) {
+    const undo = (code) => () => {
+      try {
+        revertFiles(this.root, planned, this.writeFile);
+      } catch { /* a file someone else changed is left as it is */ }
+      this.exit(code);
+    };
+    const handlers = [["SIGINT", 130], ["SIGTERM", 143], ["SIGHUP", 129]].map(([sig, code]) => [sig, undo(code)]);
+    for (const [sig, fn] of handlers) this.signals.on(sig, fn);
+    return () => {
+      for (const [sig, fn] of handlers) this.signals.off(sig, fn);
+    };
+  }
+
+  /** What to tell the service about a re-run that failed after the patched line: {error, file, line, stack}, or null when the
+   * failure cannot be placed (no frame under the source roots) or is the patched line itself. `stack` is built like a heal
+   * request's failure.stack (repo-relative, under the roots, innermost first), which is how the service proves the re-run got
+   * past the original failure; `file`/`line` are its innermost frame. The service decides whether the error is a locator that
+   * found nothing. The error is cleaned like the first one (no repository path, no compared values). */
+  laterReport(failure, planned) {
+    const stack = stackFromFailure(failure, this.settings.roots, this.root);
+    if (!stack.length) return null;
+    const { file, line } = stack[0];
+    if (file === planned.main.file && line === planned.main.line) return null;
+    return { error: cleanError(failure.error, this.root).slice(0, 4000), file: file.slice(0, 500), line, stack };
+  }
+
+  /** `file:line` where a re-run failure stopped (its innermost frame under the source roots), for a decision. */
+  laterAt(failure) {
+    const top = stackFromFailure(failure, this.settings.roots, this.root)[0];
+    return top ? `${top.file}:${top.line}`.slice(0, 500) : null;
   }
 
   /** The branch the page shows, as the runtime picks it (see LivePage.branchKey); a stand-in page without it keeps its language. */

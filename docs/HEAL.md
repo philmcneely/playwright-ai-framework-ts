@@ -37,6 +37,18 @@ npm run heal -- [--grep <name>] [--max N] [--open-pr]
 5. Print every decision with its token usage and a run total, write `heal-summary.json` into `test_artifacts/`, and with
    `--open-pr` commit **only the healed files** and open one PR (needs `git`, `gh` and a clean worktree).
 
+**A heal that fixes its own line but not the whole test.** The re-run can pass the healed line and then stop further on. When the
+failure is not on the patched line (another line, or another file such as the test calling the page object), the client reports
+`test_outcome: "failed_later"` with the cleaned error, its file and line and its `stack` (the same frames a heal request carries, so
+the service can check the re-run got past the original failure), and leaves the edit in place until the service answers. A failure
+with no frame under the source roots cannot be placed and is reported as a plain `failed`. The
+service keeps the heal (`healed`, reason `later_locator`) only if that later error is a different locator that found nothing; the
+client then heals the next failure of the same test, up to 3 extra rounds (`MAX_LATER_ROUNDS`), each as its own decision. A later
+value or assertion failure does not keep the heal, since it may have reached the wrong element: the edit is reverted. If the chain
+ends with the test still failing, the earlier heals stay, the last one carries `still_failing` and why in `heal-summary.json`, and the
+PR lists the test under "Kept, test still fails later" for a human to review. A chained round that fails outright is recorded as `needs_human` (`chain_error`) and the run goes on. While a patch is on disk
+and the service has not answered, an interrupt (SIGINT, SIGTERM, SIGHUP) puts the files back and exits non-zero.
+
 A service or browser error ends that heal as `needs_human` with the reason. It never crashes the run.
 
 ## Configuration
