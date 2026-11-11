@@ -1,0 +1,50 @@
+name: Nightly shuffled run
+# The full suite on all three browsers in a random order, to catch tests that depend on each other.
+# The log and the run summary show the shuffle seed; repeat the order with `npx playwright test --project="*" --shuffle <seed>`.
+on:
+  schedule:
+    - cron: "0 8 * * *"
+  workflow_dispatch:
+
+jobs:
+  shuffled:
+    runs-on: ubuntu-latest
+    services:
+      theinternet:
+        image: gprestes/the-internet
+        ports:
+          - 5000:5000
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "22"
+          cache: "npm"
+      - run: npm ci
+      - name: Get Playwright version
+        id: playwright-version
+        run: echo "version=$(node -p "require('@playwright/test/package.json').version")" >> "$GITHUB_OUTPUT"
+      - name: Cache Playwright browsers
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-all-${{ runner.os }}-${{ steps.playwright-version.outputs.version }}
+      - run: npx playwright install --with-deps chromium firefox webkit
+      # The seed is chosen and printed here: on CI the `failures` reporter does not print it
+      - name: Run full test suite, shuffled, all browsers
+        run: |
+          seed=$(( (RANDOM << 15) | RANDOM ))
+          echo "shuffle seed $seed"
+          echo "Shuffle seed: \`$seed\`" >> "$GITHUB_STEP_SUMMARY"
+          npx playwright test --project="*" --shuffle "$seed"
+        env:
+          BASE_URL: http://localhost:5000
+          HEADLESS: "true"
+          JIRA_ENABLED: "false"
+          OBSERVABILITY_ENABLED: "true"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: playwright-report-nightly-shuffle
+          path: results/
+          retention-days: 30

@@ -168,11 +168,18 @@ Run against a specific browser:
 npx playwright test --project=firefox
 ```
 
-Run against all browsers:
+A plain `npx playwright test` runs `chromium` only (`firefox` and `webkit` are `default: false`). Run against all browsers:
 
 ```bash
-npx playwright test --project=chromium --project=firefox --project=webkit
+npx playwright test --project="*"
 ```
+
+A nightly CI job (`.github/workflows/nightly-shuffle.yml`) runs the full suite on all three browsers in a random order
+(`--shuffle`) to catch tests that depend on each other. The run prints its shuffle seed in the log and the run summary; repeat an order with
+`npx playwright test --project="*" --shuffle <seed>`.
+
+On CI (`CI` set) the console shows failures only and the HTML and JUnit reports keep only failed, flaky and interrupted
+tests. Local runs keep the progress list and full reports.
 
 ---
 
